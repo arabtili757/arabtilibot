@@ -100,13 +100,32 @@ For the subscription check (`bot.get_chat_member`) to function correctly:
 
 ## 4. Running the Bot
 
-Run the application entry point:
+Run the application entry point locally:
 ```bash
 python bot.py
 ```
 
-* If `MONGODB_URI` is set: Connects to MongoDB Atlas, verifies indexes, and initializes repositories.
-* If `MONGODB_URI` is empty: Automatically runs in safe local mode using SQLite (`konkurs.db`), ensuring uninterrupted operation while you prepare your MongoDB cluster.
+### Deploying on Render (Web Service)
+
+The bot includes a built-in non-blocking HTTP health check server that listens on `0.0.0.0:$PORT` (or default 10000) alongside Aiogram Telegram polling. This satisfies Render's HTTP port check requirement without requiring a Background Worker.
+
+1. Create a **Web Service** on [Render](https://render.com).
+2. Connect your GitHub repository: `arabtili757/arabtilibot`.
+3. Configure the following settings:
+   * **Runtime:** `Python 3`
+   * **Build Command:** `pip install -r requirements.txt`
+   * **Start Command:** `python bot.py`
+   * **Health Check Path:** `/health` (or `/`)
+4. Add your environment variables in the Render Dashboard (**Environment** tab):
+   * `BOT_TOKEN`
+   * `ADMIN_IDS`
+   * `MONGODB_URI`
+   * `MONGODB_DB_NAME`
+   * `REQUIRED_REFERRALS`
+   * `CLOSED_CHANNEL_LINK`
+   * `SUBSCRIPTION_CHECK_ENABLED`
+   * `MANDATORY_CHANNELS`
+   * `PHOTO_1`, `PHOTO_2`, `WELCOME_STICKER`, `SUCCESS_STICKER` (optional)
 
 ---
 

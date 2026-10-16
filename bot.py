@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
+from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -26,6 +28,27 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("arab_tili_bot")
+
+
+async def health_check_handler(request: web.Request) -> web.Response:
+    """Minimal HTTP health check endpoint for Render Web Service."""
+    return web.json_response({
+        "status": "ok",
+        "service": "arab_tili_marathon_bot",
+    })
+
+
+async def start_http_server(host: str = "0.0.0.0", port: int = 10000) -> web.AppRunner:
+    """Start non-blocking HTTP server for Render port binding and health checks."""
+    app = web.Application()
+    app.router.add_get("/", health_check_handler)
+    app.router.add_get("/health", health_check_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+    logger.info(f"HTTP health server successfully listening on {host}:{port}")
+    return runner
 
 
 async def main() -> None:
@@ -49,6 +72,10 @@ async def main() -> None:
         sys.exit(1)
 
     broadcast_service = BroadcastService()
+
+    # Start non-blocking HTTP health check server for Render Web Service
+    port = int(os.getenv("PORT", "10000"))
+    http_runner = await start_http_server(host="0.0.0.0", port=port)
 
     bot = Bot(
         token=config.bot_token,
@@ -78,6 +105,7 @@ async def main() -> None:
         logger.info(f"Bot @{bot_user.username} started successfully.")
         await dp.start_polling(bot)
     finally:
+        await http_runner.cleanup()
         if db_manager:
             await db_manager.close()
         await bot.session.close()
