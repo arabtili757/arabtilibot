@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 import re
+from typing import Optional
+import certifi
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 import pymongo
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,13 @@ class DatabaseManager:
             raise ValueError("MongoDB URI is not configured.")
 
         logger.info("Connecting to MongoDB...")
-        self.client = AsyncIOMotorClient(self.uri, serverSelectionTimeoutMS=5000)
+        if self.client:
+            self.client.close()
+        self.client = AsyncIOMotorClient(
+            self.uri,
+            serverSelectionTimeoutMS=5000,
+            tlsCAFile=certifi.where(),
+        )
         # Test connection
         await self.client.admin.command("ping")
         self.db = self.client[self.db_name]

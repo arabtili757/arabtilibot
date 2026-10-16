@@ -81,23 +81,34 @@ async def main() -> None:
         while True:
             await asyncio.sleep(3600)
 
-    # 3. Connect to MongoDB Atlas
-    db_manager = None
-    try:
-        logger.info("Connecting to MongoDB Atlas...")
-        db_manager = DatabaseManager(config.mongodb_uri, config.mongodb_db_name)
-        db = await db_manager.connect()
-        user_repo = UserRepository(db)
-        settings_repo = SettingsRepository(db)
-        logger.info("MongoDB Atlas connected and repositories initialized successfully.")
-    except Exception as e:
-        logger.error(f"❌ Failed to connect to MongoDB Atlas: {e}")
-        logger.error(
-            "Please verify MONGODB_URI in Render Dashboard -> Environment, "
-            "and check MongoDB Atlas Network Access (allow 0.0.0.0/0)."
-        )
-        while True:
-            await asyncio.sleep(3600)
+    # 3. Connect to MongoDB Atlas (with retry for Atlas IP propagation)
+    db_manager = DatabaseManager(config.mongodb_uri, config.mongodb_db_name)
+    user_repo = None
+    settings_repo = None
+    max_retries = 30
+    retry_delay = 10
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Connecting to MongoDB Atlas (attempt {attempt}/{max_retries})...")
+            db = await db_manager.connect()
+            user_repo = UserRepository(db)
+            settings_repo = SettingsRepository(db)
+            logger.info("MongoDB Atlas connected and repositories initialized successfully.")
+            break
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to MongoDB Atlas (attempt {attempt}/{max_retries}): {e}")
+            logger.error(
+                "ACTION REQUIRED: In MongoDB Atlas (cloud.mongodb.com), go to Security -> Network Access -> "
+                "Add IP Address -> choose 'Allow Access from Anywhere' (0.0.0.0/0)."
+            )
+            if attempt < max_retries:
+                logger.info(f"Waiting {retry_delay}s before retrying MongoDB Atlas connection...")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.critical("❌ All MongoDB connection attempts failed. HTTP server will remain active.")
+                while True:
+                    await asyncio.sleep(3600)
 
     # 4. Start Telegram bot
     broadcast_service = BroadcastService()
