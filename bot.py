@@ -22,6 +22,12 @@ from handlers.admin_handlers import create_admin_router
 from handlers.user_handlers import create_user_router
 from services.broadcast_service import BroadcastService
 
+# Unbuffer output for real-time logs in cloud platforms (Render, Docker)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -53,37 +59,54 @@ async def start_http_server(host: str = "0.0.0.0", port: int = 10000) -> web.App
 
 async def main() -> None:
     """Initialize dependencies and start the bot polling loop."""
-    config = load_config()
-    logger.info("Configuration successfully loaded.")
+    # 1. Start HTTP health check server immediately so Render detects the port right away
+    port = int(os.getenv("PORT", "10000"))
+    logger.info(f"Starting HTTP health server on port {port}...")
+    http_runner = await start_http_server(host="0.0.0.0", port=port)
 
-    if not config.mongodb_uri or not config.mongodb_uri.strip():
-        logger.error("MONGODB_URI is required. MongoDB Atlas is the only database.")
-        sys.exit(1)
-
-    logger.info("Connecting to MongoDB Atlas...")
+    # 2. Load configuration safely
     try:
+        config = load_config()
+        logger.info("Configuration successfully loaded.")
+    except Exception as e:
+        logger.error(f"❌ Configuration error: {e}")
+        logger.error(
+            "Please configure required environment variables in Render Dashboard -> Environment:\n"
+            "- BOT_TOKEN\n"
+            "- MONGODB_URI\n"
+            "- ADMIN_IDS\n"
+            "- CLOSED_CHANNEL_LINK\n"
+            "- MANDATORY_CHANNELS"
+        )
+        while True:
+            await asyncio.sleep(3600)
+
+    # 3. Connect to MongoDB Atlas
+    db_manager = None
+    try:
+        logger.info("Connecting to MongoDB Atlas...")
         db_manager = DatabaseManager(config.mongodb_uri, config.mongodb_db_name)
         db = await db_manager.connect()
         user_repo = UserRepository(db)
         settings_repo = SettingsRepository(db)
         logger.info("MongoDB Atlas connected and repositories initialized successfully.")
     except Exception as e:
-        logger.error(f"Failed to connect to MongoDB Atlas: {e}")
-        sys.exit(1)
+        logger.error(f"❌ Failed to connect to MongoDB Atlas: {e}")
+        logger.error(
+            "Please verify MONGODB_URI in Render Dashboard -> Environment, "
+            "and check MongoDB Atlas Network Access (allow 0.0.0.0/0)."
+        )
+        while True:
+            await asyncio.sleep(3600)
 
+    # 4. Start Telegram bot
     broadcast_service = BroadcastService()
-
-    # Start non-blocking HTTP health check server for Render Web Service
-    port = int(os.getenv("PORT", "10000"))
-    http_runner = await start_http_server(host="0.0.0.0", port=port)
-
     bot = Bot(
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Register modular routers
     admin_router = create_admin_router(
         config=config,
         user_repo=user_repo,
