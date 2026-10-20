@@ -75,6 +75,7 @@ async def main() -> None:
             "Please configure required environment variables in Render Dashboard -> Environment:\n"
             "- BOT_TOKEN\n"
             "- MONGODB_URI\n"
+            "- OWNER_IDS\n"
             "- ADMIN_IDS\n"
             "- CLOSED_CHANNEL_LINK\n"
             "- MANDATORY_CHANNELS"

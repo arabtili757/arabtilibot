@@ -6,10 +6,10 @@ import logging
 from typing import Optional
 from aiogram import Bot, F, Router, types
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import InputMediaPhoto
 
-from config import BotConfig
+from config import BotConfig, DEFAULT_START_MESSAGE
 from database.models import BotSettingsDocument
 from database.repository import SettingsRepository, UserRepository
 from keyboards.user_keyboards import build_share_url, get_share_keyboard, get_sub_keyboard
@@ -55,10 +55,7 @@ def create_user_router(
         if not is_sub:
             # User has not yet joined all mandatory channels; send channel links without manual confirmation button
             await safe_sticker(bot, user_id, settings.welcome_sticker)
-            text = (
-                "🚀 <b>Marafonda ishtirok etish uchun quyidagi kanallarga a'zo bo'ling:</b>\n\n"
-                "<i>Barcha kanallarga a'zo bo'lishingiz bilan bot avtomatik tarzda ishga tushadi!</i>"
-            )
+            text = settings.start_message or DEFAULT_START_MESSAGE
             await message.answer(
                 text,
                 reply_markup=get_sub_keyboard(settings.mandatory_channels),
@@ -237,4 +234,14 @@ def create_user_router(
                 link_preview_options=NO_PREVIEW,
             )
 
+    @router.message(Command("admin", "panel"))
+    async def cmd_unauthorized_admin(message: types.Message):
+        """Notification for unauthorized users attempting to access /admin."""
+        await message.answer(
+            f"❌ <b>Ruxsat etilmadi.</b>\n\n"
+            f"Sizda ushbu botning administratorlik huquqi mavjud emas.\n"
+            f"🆔 Sizning Telegram ID: <code>{message.from_user.id}</code>"
+        )
+
     return router
+

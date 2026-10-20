@@ -5,6 +5,7 @@ import pytest
 
 # Ensure safe testing environment variables
 os.environ["BOT_TOKEN"] = "123456789:TEST_MOCK_TOKEN_XYZ"
+os.environ["OWNER_IDS"] = "5924300834"
 os.environ["ADMIN_IDS"] = "111222333,999888777"
 os.environ["REQUIRED_REFERRALS"] = "3"
 os.environ["CLOSED_CHANNEL_LINK"] = "https://t.me/+test_closed_channel"

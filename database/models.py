@@ -42,7 +42,11 @@ class BotSettingsDocument(BaseModel):
     closed_channel_link: str
     subscription_check_enabled: bool = True
     mandatory_channels: List[ChannelModel] = Field(default_factory=list)
+    channels_initialized: bool = False
+    admin_ids: List[int] = Field(default_factory=list)
+    admins_initialized: bool = False
     share_text: str
+    start_message: Optional[str] = None
     photo_1: Optional[str] = None
     photo_2: Optional[str] = None
     welcome_sticker: Optional[str] = None

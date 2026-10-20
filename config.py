@@ -37,6 +37,14 @@ DEFAULT_SHARE_TEXT = (
     '<a href="{link}">Botdan ro\'yxatdan o\'ting va marafonga qo\'shiling.</a> 🤍'
 )
 
+DEFAULT_START_MESSAGE = (
+    "🚀 <b>Marafonda ishtirok etish uchun quyidagi kanallarga a'zo bo'ling:</b>\n\n"
+    "<i>Barcha kanallarga a'zo bo'lishingiz bilan bot avtomatik tarzda ishga tushadi!</i>"
+)
+
+# Root protected administrators who cannot be removed or demoted
+PROTECTED_ADMIN_IDS: set[int] = {5924300834, 5364318707}
+
 
 class ChannelConfig(BaseModel):
     """Configuration for a mandatory subscription channel."""
@@ -61,6 +69,13 @@ class ChannelConfig(BaseModel):
         return v
 
 
+DEFAULT_MANDATORY_CHANNELS = [
+    ChannelConfig(name="Tariqul Arobiyya", url="https://t.me/+isOnYAX-dg1jZjli", id=-1003806288160),
+    ChannelConfig(name="زبان عربی با مبارک", url="https://t.me/+fPIKF0_wn69mOWU6", id=-1002499676601),
+    ChannelConfig(name="ARABIC_WORLD", url="https://t.me/arobic_world", id=-1001597783515),
+]
+
+
 class BotConfig(BaseSettings):
     """Validated bot configuration backed by environment variables."""
 
@@ -70,8 +85,9 @@ class BotConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Bot credentials
+    # Bot credentials & authorization
     bot_token: str = Field(..., alias="BOT_TOKEN")
+    owner_ids: Any = Field(default_factory=list, alias="OWNER_IDS")
     admin_ids: Any = Field(default_factory=list, alias="ADMIN_IDS")
 
     # Marathon settings
@@ -100,6 +116,20 @@ class BotConfig(BaseSettings):
     mongodb_db_name: str = Field(
         default="arab_tili_marathon", alias="MONGODB_DB_NAME"
     )
+
+    @field_validator("owner_ids", mode="before")
+    @classmethod
+    def parse_owner_ids(cls, v: Any) -> List[int]:
+        if isinstance(v, list):
+            return [int(x) for x in v]
+        if isinstance(v, int):
+            return [v]
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            return [int(x.strip()) for x in v.split(",") if x.strip()]
+        return []
 
     @field_validator("admin_ids", mode="before")
     @classmethod
@@ -142,14 +172,29 @@ class BotConfig(BaseSettings):
             raise ValueError("REQUIRED_REFERRALS must be at least 1")
         return v
 
+    @property
+    def all_protected_admin_ids(self) -> set[int]:
+        """Return all protected root and owner administrator IDs."""
+        return PROTECTED_ADMIN_IDS | set(self.owner_ids)
+
+    def is_protected_admin(self, user_id: int) -> bool:
+        """Check if a given user ID is a permanently protected administrator."""
+        return user_id in self.all_protected_admin_ids
+
+    def is_owner(self, user_id: int) -> bool:
+        """Check if user is configured in OWNER_IDS."""
+        return user_id in self.owner_ids
+
     def is_admin(self, user_id: int) -> bool:
-        """Check if a given user ID is an admin."""
-        return user_id in self.admin_ids
+        """Check if a given user ID is an authorized admin from config/root sources."""
+        return user_id in self.all_protected_admin_ids or user_id in self.admin_ids
+
 
     def __repr__(self) -> str:
         # Prevent secret leaks in logs
         return (
-            f"BotConfig(admin_ids={self.admin_ids}, "
+            f"BotConfig(owner_ids={self.owner_ids}, "
+            f"admin_ids={self.admin_ids}, "
             f"required_referrals={self.required_referrals}, "
             f"channels_count={len(self.mandatory_channels)}, "
             f"subscription_check={self.subscription_check_enabled})"

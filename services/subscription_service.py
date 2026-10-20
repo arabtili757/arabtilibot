@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 from aiogram import Bot
 
 logger = logging.getLogger(__name__)
@@ -44,19 +44,49 @@ class SubscriptionService:
         return True
 
     @staticmethod
-    async def verify_channel_access(bot: Bot, channel_id: int) -> Tuple[bool, str]:
-        """Verify whether the bot has administrative privileges in a channel to check members."""
+    async def verify_channel_access(
+        bot: Bot, channel_id: int
+    ) -> Tuple[bool, str, Optional[str]]:
+        """Verify whether the bot has administrative privileges in a channel to check members.
+
+        Preflight check using Telegram Bot API:
+        1. Call getChat to verify that the bot can access the channel.
+        2. Call getChatMember with the bot's own ID to check its membership status and administrator privileges.
+        3. Reject the addition if the bot is not an administrator or Telegram permissions are insufficient.
+        """
         try:
-            bot_member = await bot.get_chat_member(chat_id=channel_id, user_id=bot.id)
+            bot_info = await bot.get_me()
+            bot_id = bot_info.id
+        except Exception:
+            bot_id = getattr(bot, "id", None)
+
+        # 1. Verify channel accessibility via getChat
+        try:
+            chat = await bot.get_chat(chat_id=channel_id)
+            chat_title = getattr(chat, "title", None) or str(channel_id)
+        except Exception as e:
+            logger.warning(f"Preflight getChat failed for channel {channel_id}: {e}")
+            return (
+                False,
+                f"Kanalga ulanib bo'lmadi ({e}). Iltimos, kanal ID to'g'riligini va bot kanalga qo'shilganligini tekshiring.",
+                None,
+            )
+
+        # 2. Verify bot administrator permissions via getChatMember
+        try:
+            bot_member = await bot.get_chat_member(chat_id=channel_id, user_id=bot_id)
             status = str(getattr(bot_member.status, "value", bot_member.status))
             if status in ("administrator", "creator"):
-                return True, "Bot kanal ma'muri hisoblanadi."
+                return True, "Bot kanal ma'muri hisoblanadi va a'zolikni tekshirish ruxsatiga ega.", chat_title
             return (
                 False,
-                "Bot kanalda ma'mur (admin) emas. A'zolikni tekshirish uchun botga admin huquqi berilishi shart.",
+                "Bot kanalda ma'mur (admin) emas! Kanalni qo'shish uchun avval botni kanalga qo'shib, unga administrator huquqini berishingiz shart.",
+                chat_title,
             )
         except Exception as e:
+            logger.warning(f"Preflight getChatMember failed for channel {channel_id}: {e}")
             return (
                 False,
-                f"Kanalga ulanishda xatolik yuz berdi: {e}. Bot kanalga qo'shilganligini tekshiring.",
+                f"Botning kanaldagi a'zolik holatini tekshirishda xatolik yuz berdi ({e}). Iltimos, bot kanalga qo'shilib admin qilinganini tekshiring.",
+                chat_title,
             )

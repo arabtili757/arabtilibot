@@ -76,12 +76,13 @@ Arab Tili Bot/
    ```
    Fill in your actual credentials in `.env`:
    * `BOT_TOKEN`: Your Telegram Bot API token.
-   * `ADMIN_IDS`: Comma-separated list of Telegram admin user IDs.
+   * `OWNER_IDS`: Comma-separated list of Telegram super-administrator (Owner) user IDs (e.g. `5924300834`). Owners have full rights and manage administrators.
+   * `ADMIN_IDS`: Comma-separated list of initial Telegram admin user IDs (e.g. `5364318707`).
    * `REQUIRED_REFERRALS`: Number of referrals needed to unlock the closed channel (e.g. `3`).
    * `CLOSED_CHANNEL_LINK`: The invite link to the closed marathon channel.
    * `SUBSCRIPTION_CHECK_ENABLED`: Set to `true` or `false`.
    * `MANDATORY_CHANNELS`: JSON array of required channels (`[{"name": "...", "url": "...", "id": -100...}]`).
-   * `MONGODB_URI`: MongoDB Atlas connection string (leave blank to run in local SQLite fallback mode).
+   * `MONGODB_URI`: MongoDB Atlas connection string.
    * `MONGODB_DB_NAME`: Database name (e.g. `arab_tili_marathon`).
 
 ---
