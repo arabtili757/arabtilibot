@@ -26,6 +26,7 @@ from keyboards.admin_keyboards import (
     get_cancel_keyboard,
     get_cancel_to_channels_keyboard,
     get_cancel_to_mgmt_keyboard,
+    get_cancel_to_promo_images_keyboard,
     get_cancel_to_start_msg_keyboard,
     get_channels_delete_picker_keyboard,
     get_channels_list_keyboard,
@@ -33,7 +34,13 @@ from keyboards.admin_keyboards import (
     get_confirm_admin_delete_keyboard,
     get_confirm_channel_add_keyboard,
     get_confirm_channel_delete_keyboard,
+    get_confirm_clear_all_promo_images,
+    get_confirm_promo_image_add_keyboard,
+    get_confirm_promo_image_delete,
     get_confirm_start_message_keyboard,
+    get_promo_images_delete_picker,
+    get_promo_images_keyboard,
+    get_promo_images_list_keyboard,
     get_promo_preview_keyboard,
     get_start_message_keyboard,
 )
@@ -69,8 +76,8 @@ class AdminStates(StatesGroup):
     waiting_for_share_text = State()
     waiting_for_promo_text = State()
     waiting_for_promo_confirm = State()
-    waiting_for_photo1 = State()
-    waiting_for_photo2 = State()
+    waiting_for_promo_image = State()
+    waiting_for_promo_image_confirm = State()
     waiting_for_welcome_sticker = State()
     waiting_for_success_sticker = State()
 
@@ -840,15 +847,13 @@ def create_admin_router(
     async def cb_admin_media(call: types.CallbackQuery, state: FSMContext):
         await state.clear()
         settings = await get_current_settings()
-        p1 = "Bor" if settings.photo_1 else "Yo'q"
-        p2 = "Bor" if settings.photo_2 else "Yo'q"
+        promo_count = len(settings.promo_images) if settings.promo_images else 0
         ws = "Bor" if settings.welcome_sticker else "Yo'q"
         ss = "Bor" if settings.success_sticker else "Yo'q"
 
         text = (
             "🖼 <b>Media va Matnlar Sozlamasi</b>\n\n"
-            f"🖼 Rasm 1: <b>{p1}</b>\n"
-            f"🖼 Rasm 2: <b>{p2}</b>\n"
+            f"🖼 Reklama rasmlari: <b>{promo_count} ta</b>\n"
             f"🌟 Xush kelibsiz stikeri: <b>{ws}</b>\n"
             f"🎉 G'alaba stikeri: <b>{ss}</b>\n\n"
             "Tahrirlash uchun kerakli bo'limni tanlang:"
@@ -859,94 +864,260 @@ def create_admin_router(
             await call.message.answer(text, reply_markup=get_admin_media_keyboard())
         await call.answer()
 
-    @router.callback_query(F.data.in_(["admin_edit_promo", "admin_set_share_text"]))
-    async def cb_edit_promo_text(call: types.CallbackQuery, state: FSMContext):
-        await state.set_state(AdminStates.waiting_for_promo_text)
+    # ---------- 4.1. Promotional Images Management ----------
+    @router.callback_query(F.data == "admin_promo_images")
+    async def cb_admin_promo_images(call: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        images = await settings_repo.get_promo_images()
+        count = len(images)
         text = (
-            "📝 <b>Asosiy xabarni tahrirlash</b>\n\n"
-            "Yangi asosiy reklama posti xabarini yuboring.\n\n"
-            "💡 <i>Qalin (bold), kursiv (italic), havola (link), blockquote va boshqa Telegram HTML teglari to'liq qo'llab-quvvatlanadi.</i>\n\n"
-            "❗️ <b>Muhim:</b> Matnda foydalanuvchining shaxsiy taklif havolasi joylashishi uchun "
-            "<code>{link}</code> tegini qoldirishni unutmang!\n\n"
-            "<i>Masalan: &lt;a href=\"{link}\"&gt;Botdan ro'yxatdan o'ting va marafonga qo'shiling.&lt;/a&gt;</i>"
+            "🖼 <b>Reklama rasmlarini boshqarish</b>\n\n"
+            f"Hozirda saqlangan rasmlar soni: <b>{count} ta</b>\n\n"
+            "Kerakli amalni tanlang:"
         )
         try:
-            await call.message.edit_text(text, reply_markup=get_cancel_keyboard())
+            await call.message.edit_text(text, reply_markup=get_promo_images_keyboard(count))
         except Exception:
-            await call.message.answer(text, reply_markup=get_cancel_keyboard())
+            await call.message.answer(text, reply_markup=get_promo_images_keyboard(count))
         await call.answer()
 
-    @router.message(AdminStates.waiting_for_promo_text)
-    async def msg_receive_promo_text(message: types.Message, state: FSMContext, bot: Bot):
-        text = (message.html_text or message.text or "").strip()
-        if not text:
-            await message.answer(
-                "❌ Bo'sh bo'lmagan xabar yuboring:",
-                reply_markup=get_cancel_keyboard(),
-            )
-            return
-
-        if "{link}" not in text:
-            await message.answer(
-                "❌ Xabarda <code>{link}</code> tegi bo'lishi shart!\n\n"
-                "Ushbu teg o'rniga har bir foydalanuvchining shaxsiy referal havolasi qo'yiladi. "
-                "Iltimos, <code>{link}</code> tegini qoldirib qayta yuboring:",
-                reply_markup=get_cancel_keyboard(),
-            )
-            return
-
-        # Validate that format succeeds with sample link
-        bot_info = await bot.get_me()
-        bot_username = bot_info.username or "ArabiyaBoost_bot"
-        sample_link = f"https://t.me/{bot_username}?start=123456789"
-        try:
-            preview_formatted = text.format(link=sample_link)
-        except Exception as e:
-            await message.answer(
-                f"❌ Matn formatlashda xatolik yuz berdi: {e}. Iltimos, qayta yuboring:",
-                reply_markup=get_cancel_keyboard(),
-            )
-            return
-
-        await state.update_data(pending_promo_text=text)
-        await state.set_state(AdminStates.waiting_for_promo_confirm)
-
-        preview_msg = (
-            "👁 <b>Yangi xabar ko'rinishi (Preview):</b>\n\n"
-            f"{preview_formatted}\n\n"
-            "────────────────────\n"
-            "Ushbu xabarni asosiy reklama posti sifatida saqlashni tasdiqlaysizmi?"
+    @router.callback_query(F.data == "admin_promo_img_add")
+    async def cb_promo_img_add_prompt(call: types.CallbackQuery, state: FSMContext):
+        await state.set_state(AdminStates.waiting_for_promo_image)
+        text = (
+            "➕ <b>Yangi reklama rasmini qo'shish</b>\n\n"
+            "Iltimos, reklama uchun rasmni botga to'g'ridan-to'g'ri <b>rasm (photo)</b> ko'rinishida yuboring.\n\n"
+            "⚠️ <i>Eslatma: Rasmni fayl (hujjat) emas, siqilgan (oddiy rasm) holatida yuboring.</i>"
         )
-        await message.answer(preview_msg, reply_markup=get_promo_preview_keyboard())
+        try:
+            await call.message.edit_text(text, reply_markup=get_cancel_to_promo_images_keyboard())
+        except Exception:
+            await call.message.answer(text, reply_markup=get_cancel_to_promo_images_keyboard())
+        await call.answer()
 
-    @router.callback_query(F.data == "admin_promo_confirm", AdminStates.waiting_for_promo_confirm)
-    async def cb_promo_confirm(call: types.CallbackQuery, state: FSMContext):
+    @router.message(AdminStates.waiting_for_promo_image, F.photo)
+    async def msg_receive_promo_photo(message: types.Message, state: FSMContext):
+        if not message.photo:
+            await message.answer(
+                "❌ Rasm topilmadi. Iltimos, haqiqiy rasm yuboring:",
+                reply_markup=get_cancel_to_promo_images_keyboard(),
+            )
+            return
+
+        # Select the largest available PhotoSize
+        largest_photo = message.photo[-1]
+        file_id = largest_photo.file_id
+
+        # Check for duplicate
+        current_images = await settings_repo.get_promo_images()
+        if file_id in current_images:
+            await message.answer(
+                "⚠️ <b>Bu rasm allaqachon reklama rasmlari ro'yxatida mavjud!</b>\n\n"
+                "Iltimos, boshqa rasm yuboring yoki bekor qiling:",
+                reply_markup=get_cancel_to_promo_images_keyboard(),
+            )
+            return
+
+        await state.update_data(pending_promo_image=file_id)
+        await state.set_state(AdminStates.waiting_for_promo_image_confirm)
+
+        preview_caption = (
+            "👁 <b>Rasm ko'rinishi (Preview)</b>\n\n"
+            f"O'lchami: {largest_photo.width}x{largest_photo.height}\n\n"
+            "Ushbu rasmni reklama rasmlari safiga qo'shishni tasdiqlaysizmi?"
+        )
+        await message.answer_photo(
+            photo=file_id,
+            caption=preview_caption,
+            reply_markup=get_confirm_promo_image_add_keyboard(),
+        )
+
+    @router.message(AdminStates.waiting_for_promo_image, F.document)
+    async def msg_reject_promo_document(message: types.Message):
+        await message.answer(
+            "❌ <b>Bu rasm emas, fayl (hujjat) ko'rinishida yuborildi!</b>\n\n"
+            "Telegram hujjat (fayl) ko'rinishidagi rasmlarni reklama albomida ko'rsata olmaydi.\n"
+            "Iltimos, rasmni jo'natishda <b>'Compress images' (Rasmni siqish)</b> belgilangan holda, "
+            "oddiy rasm sifatida qayta yuboring:",
+            reply_markup=get_cancel_to_promo_images_keyboard(),
+        )
+
+    @router.message(AdminStates.waiting_for_promo_image)
+    async def msg_reject_promo_invalid_media(message: types.Message):
+        await message.answer(
+            "❌ <b>Noto'g'ri format!</b>\n\n"
+            "Faqat haqiqiy rasm (photo) qabul qilinadi. Matn, video, stiker yoki audio qabul qilinmaydi.\n\n"
+            "Iltimos, reklama uchun haqiqiy rasm yuboring:",
+            reply_markup=get_cancel_to_promo_images_keyboard(),
+        )
+
+    @router.callback_query(F.data == "admin_promo_img_add_confirm", AdminStates.waiting_for_promo_image_confirm)
+    async def cb_promo_img_add_confirm(call: types.CallbackQuery, state: FSMContext):
         data = await state.get_data()
-        new_text = data.get("pending_promo_text")
+        file_id = data.get("pending_promo_image")
         await state.clear()
 
-        if not new_text:
-            await call.answer("Xatolik: Yangi matn topilmadi.", show_alert=True)
-            await cb_admin_main(call, state)
+        if not file_id:
+            await call.answer("Xatolik: Rasm ma'lumotlari topilmadi.", show_alert=True)
+            await cb_admin_promo_images(call, state)
             return
 
-        await settings_repo.update_settings({"share_text": new_text})
+        # Save directly in MongoDB; immediately active without restart
+        await settings_repo.add_promo_image(file_id)
+        images = await settings_repo.get_promo_images()
+
         success_text = (
-            "✅ <b>Asosiy reklama xabari muvaffaqiyatli saqlandi!</b>\n\n"
-            "Yangi xabar darhol kuchga kirdi va barcha yangi foydalanuvchilarga yuboriladi. "
-            "U bot qayta ishga tushganda ham MongoDB da saqlanib qoladi."
+            "✅ <b>Rasm muvaffaqiyatli saqlandi!</b>\n\n"
+            f"Yangi rasm darhol reklama xabarlari tizimiga qo'shildi.\n"
+            f"Jami saqlangan rasmlar: <b>{len(images)} ta</b>.\n\n"
+            "Botni qayta ishga tushirish talab qilinmaydi."
         )
         try:
-            await call.message.edit_text(success_text, reply_markup=get_admin_main_keyboard())
+            await call.message.answer(success_text, reply_markup=get_promo_images_keyboard(len(images)))
         except Exception:
-            await call.message.answer(success_text, reply_markup=get_admin_main_keyboard())
+            await call.message.edit_text(success_text, reply_markup=get_promo_images_keyboard(len(images)))
         await call.answer("Muvaffaqiyatli saqlandi!")
 
-    @router.callback_query(F.data.in_(["admin_set_photo1", "admin_set_photo2", "admin_set_welcome_sticker", "admin_set_success_sticker"]))
+    @router.callback_query(F.data == "admin_promo_img_list")
+    async def cb_promo_img_list(call: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        images = await settings_repo.get_promo_images()
+        if not images:
+            text = (
+                "📭 <b>Hozircha hech qanday reklama rasmi saqlanmagan.</b>\n\n"
+                "Yangi rasm qo'shish uchun <b>➕ Rasm qo'shish</b> tugmasini bosing."
+            )
+            try:
+                await call.message.edit_text(text, reply_markup=get_promo_images_list_keyboard())
+            except Exception:
+                await call.message.answer(text, reply_markup=get_promo_images_list_keyboard())
+            await call.answer()
+            return
+
+        await call.answer("Rasmlar yuklanmoqda...")
+        for idx, file_id in enumerate(images, start=1):
+            caption = f"🖼 <b>Reklama rasmi #{idx}</b>\n<code>{file_id}</code>"
+            try:
+                await call.message.answer_photo(photo=file_id, caption=caption)
+            except Exception as e:
+                logger.warning(f"Could not preview image {idx}: {e}")
+                await call.message.answer(
+                    f"⚠️ <b>Reklama rasmi #{idx}</b> yuklanmadi:\n<code>{file_id}</code>"
+                )
+
+        summary_text = (
+            f"📋 Jami <b>{len(images)} ta</b> reklama rasmi saqlangan.\n\n"
+            "Rasmni o'chirish uchun <b>➖ Rasmni o'chirish</b> tugmasini bosing:"
+        )
+        await call.message.answer(summary_text, reply_markup=get_promo_images_list_keyboard())
+
+    @router.callback_query(F.data == "admin_promo_img_del_menu")
+    async def cb_promo_img_del_menu(call: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        images = await settings_repo.get_promo_images()
+        if not images:
+            await call.answer("O'chirish uchun rasmlar mavjud emas!", show_alert=True)
+            return
+
+        text = (
+            "➖ <b>Rasmni o'chirish</b>\n\n"
+            "O'chirmoqchi bo'lgan rasmni tanlang:"
+        )
+        try:
+            await call.message.edit_text(text, reply_markup=get_promo_images_delete_picker(images))
+        except Exception:
+            await call.message.answer(text, reply_markup=get_promo_images_delete_picker(images))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("admin_promo_del_prompt_"))
+    async def cb_promo_img_del_prompt(call: types.CallbackQuery):
+        idx_str = call.data.replace("admin_promo_del_prompt_", "")
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            await call.answer("Noto'g'ri parametr!", show_alert=True)
+            return
+
+        images = await settings_repo.get_promo_images()
+        if idx < 0 or idx >= len(images):
+            await call.answer("Bunday rasm topilmadi!", show_alert=True)
+            return
+
+        prompt_text = (
+            f"⚠️ <b>Haqiqatan ham #{idx + 1}-rasmni o'chirmoqchimisiz?</b>\n\n"
+            "Bu amal reklama xabarlaridan ushbu rasmni darhol olib tashlaydi."
+        )
+        try:
+            await call.message.edit_text(prompt_text, reply_markup=get_confirm_promo_image_delete(idx))
+        except Exception:
+            await call.message.answer(prompt_text, reply_markup=get_confirm_promo_image_delete(idx))
+        await call.answer()
+
+    @router.callback_query(F.data.startswith("admin_promo_del_confirm_"))
+    async def cb_promo_img_del_confirm(call: types.CallbackQuery):
+        idx_str = call.data.replace("admin_promo_del_confirm_", "")
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            await call.answer("Noto'g'ri parametr!", show_alert=True)
+            return
+
+        images = await settings_repo.get_promo_images()
+        if 0 <= idx < len(images):
+            file_id = images[idx]
+            await settings_repo.remove_promo_image(file_id)
+            updated_images = await settings_repo.get_promo_images()
+            success_text = (
+                f"✅ <b>#{idx + 1}-rasm muvaffaqiyatli o'chirildi!</b>\n\n"
+                f"Qolgan rasmlar soni: <b>{len(updated_images)} ta</b>."
+            )
+        else:
+            updated_images = images
+            success_text = "⚠️ Rasm topilmadi yoki allaqachon o'chirilgan."
+
+        try:
+            await call.message.edit_text(success_text, reply_markup=get_promo_images_keyboard(len(updated_images)))
+        except Exception:
+            await call.message.answer(success_text, reply_markup=get_promo_images_keyboard(len(updated_images)))
+        await call.answer("O'chirildi!")
+
+    @router.callback_query(F.data == "admin_promo_img_clear_prompt")
+    async def cb_promo_img_clear_prompt(call: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        images = await settings_repo.get_promo_images()
+        if not images:
+            await call.answer("O'chirish uchun rasmlar mavjud emas!", show_alert=True)
+            return
+
+        text = (
+            "⚠️ <b>DIQQAT: Barcha reklama rasmlarini o'chirish</b>\n\n"
+            f"Hozirda saqlangan jami <b>{len(images)} ta</b> rasm butunlay o'chiriladi.\n\n"
+            "Haqiqatan ham barcha rasmlarni o'chirishni tasdiqlaysizmi?"
+        )
+        try:
+            await call.message.edit_text(text, reply_markup=get_confirm_clear_all_promo_images())
+        except Exception:
+            await call.message.answer(text, reply_markup=get_confirm_clear_all_promo_images())
+        await call.answer()
+
+    @router.callback_query(F.data == "admin_promo_img_clear_confirm")
+    async def cb_promo_img_clear_confirm(call: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        await settings_repo.clear_promo_images()
+
+        text = (
+            "🗑 <b>Barcha reklama rasmlari muvaffaqiyatli o'chirildi!</b>\n\n"
+            "Endi yangi foydalanuvchilarga faqat matnli reklama xabari yuboriladi."
+        )
+        try:
+            await call.message.edit_text(text, reply_markup=get_promo_images_keyboard(0))
+        except Exception:
+            await call.message.answer(text, reply_markup=get_promo_images_keyboard(0))
+        await call.answer("Barcha rasmlar o'chirildi!")
+
+    @router.callback_query(F.data.in_(["admin_set_welcome_sticker", "admin_set_success_sticker"]))
     async def cb_set_media_items(call: types.CallbackQuery, state: FSMContext):
         mapping = {
-            "admin_set_photo1": (AdminStates.waiting_for_photo1, "🖼 Rasm 1 ning yangi file_id sini yuboring:"),
-            "admin_set_photo2": (AdminStates.waiting_for_photo2, "🖼 Rasm 2 ning yangi file_id sini yuboring:"),
             "admin_set_welcome_sticker": (AdminStates.waiting_for_welcome_sticker, "🌟 Xush kelibsiz stikerining yangi file_id sini yuboring:"),
             "admin_set_success_sticker": (AdminStates.waiting_for_success_sticker, "🎉 G'alaba stikerining yangi file_id sini yuboring:"),
         }
@@ -954,26 +1125,6 @@ def create_admin_router(
         await state.set_state(st)
         await call.message.edit_text(prompt, reply_markup=get_cancel_keyboard())
         await call.answer()
-
-    @router.message(AdminStates.waiting_for_photo1)
-    async def msg_save_photo1(message: types.Message, state: FSMContext):
-        val = (message.text or "").strip()
-        if not val:
-            await message.answer("❌ Bo'sh bo'lmagan file_id yuboring:", reply_markup=get_cancel_keyboard())
-            return
-        await settings_repo.update_settings({"photo_1": val})
-        await state.clear()
-        await message.answer("✅ Rasm 1 ID saqlandi!", reply_markup=get_admin_main_keyboard())
-
-    @router.message(AdminStates.waiting_for_photo2)
-    async def msg_save_photo2(message: types.Message, state: FSMContext):
-        val = (message.text or "").strip()
-        if not val:
-            await message.answer("❌ Bo'sh bo'lmagan file_id yuboring:", reply_markup=get_cancel_keyboard())
-            return
-        await settings_repo.update_settings({"photo_2": val})
-        await state.clear()
-        await message.answer("✅ Rasm 2 ID saqlandi!", reply_markup=get_admin_main_keyboard())
 
     @router.message(AdminStates.waiting_for_welcome_sticker)
     async def msg_save_welcome_sticker(message: types.Message, state: FSMContext):

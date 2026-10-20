@@ -103,8 +103,6 @@ class BotConfig(BaseSettings):
     )
 
     # Media file IDs
-    photo_1: Optional[str] = Field(default=None, alias="PHOTO_1")
-    photo_2: Optional[str] = Field(default=None, alias="PHOTO_2")
     welcome_sticker: Optional[str] = Field(default=None, alias="WELCOME_STICKER")
     success_sticker: Optional[str] = Field(default=None, alias="SUCCESS_STICKER")
 

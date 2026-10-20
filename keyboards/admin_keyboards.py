@@ -17,7 +17,7 @@ def get_admin_main_keyboard(is_owner: bool = True) -> InlineKeyboardMarkup:
     builder.row(types.InlineKeyboardButton(text="👥 Adminlarni boshqarish", callback_data="admin_mgmt"))
     builder.row(types.InlineKeyboardButton(text="📝 Asosiy xabarni tahrirlash", callback_data="admin_edit_promo"))
     builder.row(types.InlineKeyboardButton(text="⚙️ Marafon sozlamalari", callback_data="admin_settings"))
-    builder.row(types.InlineKeyboardButton(text="🖼 Media va Matnlar", callback_data="admin_media"))
+    builder.row(types.InlineKeyboardButton(text="🖼 Reklama rasmlarini boshqarish", callback_data="admin_promo_images"))
     builder.row(types.InlineKeyboardButton(text="✉️ Xabar yuborish (Broadcast)", callback_data="admin_broadcast"))
     return builder.as_markup()
 
@@ -204,16 +204,91 @@ def get_admin_media_keyboard() -> InlineKeyboardMarkup:
     """Generate keyboard for editing share text, photos, and stickers."""
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📝 Asosiy xabarni tahrirlash", callback_data="admin_edit_promo"))
-    builder.row(
-        types.InlineKeyboardButton(text="🖼 Rasm 1 ID", callback_data="admin_set_photo1"),
-        types.InlineKeyboardButton(text="🖼 Rasm 2 ID", callback_data="admin_set_photo2"),
-    )
+    builder.row(types.InlineKeyboardButton(text="🖼 Reklama rasmlarini boshqarish", callback_data="admin_promo_images"))
     builder.row(
         types.InlineKeyboardButton(text="🌟 Xush kelibsiz stikeri", callback_data="admin_set_welcome_sticker"),
         types.InlineKeyboardButton(text="🎉 G'alaba stikeri", callback_data="admin_set_success_sticker"),
     )
     builder.row(types.InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="admin_main"))
     return builder.as_markup()
+
+
+# ==============================================================================
+# Promotional Images Management Keyboards
+# ==============================================================================
+
+def get_promo_images_keyboard(count: int = 0) -> InlineKeyboardMarkup:
+    """Generate keyboard for promotional images management section."""
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="➕ Rasm qo'shish", callback_data="admin_promo_img_add"))
+    builder.row(types.InlineKeyboardButton(text="📋 Rasmlarni ko'rish", callback_data="admin_promo_img_list"))
+    builder.row(types.InlineKeyboardButton(text="➖ Rasmni o'chirish", callback_data="admin_promo_img_del_menu"))
+    builder.row(types.InlineKeyboardButton(text="🗑 Barcha rasmlarni o'chirish", callback_data="admin_promo_img_clear_prompt"))
+    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_main"))
+    return builder.as_markup()
+
+
+def get_confirm_promo_image_add_keyboard() -> InlineKeyboardMarkup:
+    """Confirmation keyboard for saving a newly sent promotional image."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ Ha, saqlansin", callback_data="admin_promo_img_add_confirm"),
+        types.InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_promo_images"),
+    )
+    return builder.as_markup()
+
+
+def get_cancel_to_promo_images_keyboard() -> InlineKeyboardMarkup:
+    """Cancel button returning to promotional images menu."""
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_promo_images"))
+    return builder.as_markup()
+
+
+def get_promo_images_list_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard shown when viewing promotional images."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="➕ Rasm qo'shish", callback_data="admin_promo_img_add"),
+        types.InlineKeyboardButton(text="➖ Rasmni o'chirish", callback_data="admin_promo_img_del_menu"),
+    )
+    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_promo_images"))
+    return builder.as_markup()
+
+
+def get_promo_images_delete_picker(images: List[str]) -> InlineKeyboardMarkup:
+    """Keyboard for selecting which promotional image to delete."""
+    builder = InlineKeyboardBuilder()
+    for idx in range(len(images)):
+        builder.row(
+            types.InlineKeyboardButton(
+                text=f"❌ {idx + 1}-rasmni o'chirish",
+                callback_data=f"admin_promo_del_prompt_{idx}",
+            )
+        )
+    builder.row(types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_promo_images"))
+    return builder.as_markup()
+
+
+def get_confirm_promo_image_delete(index: int) -> InlineKeyboardMarkup:
+    """Confirmation keyboard before removing an individual image."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="⚠️ Ha, o'chirilsin", callback_data=f"admin_promo_del_confirm_{index}"),
+        types.InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_promo_images"),
+    )
+    return builder.as_markup()
+
+
+def get_confirm_clear_all_promo_images() -> InlineKeyboardMarkup:
+    """Confirmation keyboard before clearing all promotional images."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="🗑 Ha, barchasini o'chirish", callback_data="admin_promo_img_clear_confirm"),
+        types.InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_promo_images"),
+    )
+    return builder.as_markup()
+
 
 
 def get_promo_preview_keyboard() -> InlineKeyboardMarkup:

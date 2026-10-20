@@ -126,7 +126,7 @@ The bot includes a built-in non-blocking HTTP health check server that listens o
    * `CLOSED_CHANNEL_LINK`
    * `SUBSCRIPTION_CHECK_ENABLED`
    * `MANDATORY_CHANNELS`
-   * `PHOTO_1`, `PHOTO_2`, `WELCOME_STICKER`, `SUCCESS_STICKER` (optional)
+   * `WELCOME_STICKER`, `SUCCESS_STICKER` (optional)
 
 ---
 

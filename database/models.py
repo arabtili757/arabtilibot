@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def utc_now() -> datetime:
@@ -37,18 +37,19 @@ class ChannelModel(BaseModel):
 class BotSettingsDocument(BaseModel):
     """Dynamic runtime settings stored in MongoDB."""
 
+    model_config = ConfigDict(extra="ignore")
+
     key: str = "app_settings"
     required_referrals: int = 3
-    closed_channel_link: str
+    closed_channel_link: str = "https://t.me/+example"
     subscription_check_enabled: bool = True
     mandatory_channels: List[ChannelModel] = Field(default_factory=list)
     channels_initialized: bool = False
     admin_ids: List[int] = Field(default_factory=list)
     admins_initialized: bool = False
-    share_text: str
+    share_text: str = ""
     start_message: Optional[str] = None
-    photo_1: Optional[str] = None
-    photo_2: Optional[str] = None
+    promo_images: List[str] = Field(default_factory=list)
     welcome_sticker: Optional[str] = None
     success_sticker: Optional[str] = None
     updated_at: datetime = Field(default_factory=utc_now)

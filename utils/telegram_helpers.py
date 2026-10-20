@@ -45,3 +45,19 @@ async def safe_send_media_group(
     except Exception as e:
         logger.warning(f"Media group delivery failed for {chat_id}: {e}")
         return None
+
+
+async def safe_send_photo(
+    bot: Bot,
+    chat_id: int,
+    photo: str,
+    caption: Optional[str] = None,
+    **kwargs: Any,
+) -> Optional[Message]:
+    """Safely send a Telegram photo catching exceptions to prevent crashes."""
+    try:
+        return await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, **kwargs)
+    except Exception as e:
+        logger.warning(f"Could not send photo to {chat_id}: {e}")
+        return None
+

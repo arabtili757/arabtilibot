@@ -13,9 +13,15 @@ from config import BotConfig, DEFAULT_START_MESSAGE
 from database.models import BotSettingsDocument
 from database.repository import SettingsRepository, UserRepository
 from keyboards.user_keyboards import build_share_url, get_share_keyboard, get_sub_keyboard
-from services.referral_service import ReferralService
+from services.referral_service import ReferralService, RegistrationResult
 from services.subscription_service import SubscriptionService
-from utils.telegram_helpers import NO_PREVIEW, safe_send, safe_send_media_group, safe_sticker
+from utils.telegram_helpers import (
+    NO_PREVIEW,
+    safe_send,
+    safe_send_media_group,
+    safe_send_photo,
+    safe_sticker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,117 +128,15 @@ def create_user_router(
         except Exception:
             pass
 
-        await complete_registration_and_respond(user_id=user_id, bot=bot, settings=settings)
+        await _complete_registration(user_id=user_id, bot=bot, settings=settings)
 
-    async def complete_registration_and_respond(
-        user_id: int, bot: Bot, settings: BotSettingsDocument
-    ):
-        """Complete registration atomically and deliver welcome, stats, promotional album, and share button."""
-        result = await referral_service.complete_registration(
+    async def _complete_registration(user_id: int, bot: Bot, settings: BotSettingsDocument):
+        await complete_registration_and_respond(
             user_id=user_id,
-            required_referrals=settings.required_referrals,
+            bot=bot,
+            settings=settings,
+            referral_service=referral_service,
         )
-
-        # Notify referrer if applicable
-        notif = result.referrer_notification
-        if notif:
-            rid = notif.referrer_id
-            count = notif.current_count
-            req = notif.required_count
-
-            if notif.kind == "success":
-                await safe_sticker(bot, rid, settings.success_sticker)
-                await safe_send(
-                    bot,
-                    rid,
-                    f"🎉 <b>Tabriklaymiz!</b>\n"
-                    f"<blockquote>Siz {req} ta do'stingizni taklif qildingiz va shartni bajardingiz.</blockquote>\n"
-                    f"👇 <b>Marafon bo'ladigan yopiq kanalga kirish uchun havola:</b>\n{settings.closed_channel_link}",
-                    link_preview_options=NO_PREVIEW,
-                )
-            elif notif.kind == "progress":
-                await safe_send(
-                    bot,
-                    rid,
-                    f"👤 <b>Yangi do'stingiz</b> sizning havolangiz orqali botga kirdi!\n\n"
-                    f"📈 Hozirgi takliflaringiz soni: <b>{count}/{req}</b> ta.",
-                )
-            elif notif.kind == "extra_progress":
-                await safe_send(
-                    bot,
-                    rid,
-                    f"👤 <b>Yangi do'stingiz</b> sizning havolangiz orqali botga kirdi!\n\n"
-                    f"📈 Hozirgi takliflaringiz soni: <b>{count}</b> ta.",
-                )
-
-        # Build personalized referral and share links
-        bot_info = await bot.get_me()
-        bot_username = bot_info.username or "ArabiyaBoost_bot"
-        my_link, share_url = build_share_url(bot_username, user_id)
-        share_kb = get_share_keyboard(share_url)
-
-        if result.is_completed:
-            await safe_send(
-                bot,
-                user_id,
-                f"✅ <b>Siz kerakli miqdordagi do'stlaringizni taklif qilgansiz!</b>\n\n"
-                f"<blockquote>Marafonga kirish uchun ssilka: {settings.closed_channel_link}</blockquote>\n"
-                f"📊 Jami takliflaringiz: <b>{result.user_referrals_count} ta.</b>",
-                reply_markup=share_kb,
-                link_preview_options=NO_PREVIEW,
-            )
-            return
-
-        await safe_send(
-            bot,
-            user_id,
-            f"🌟 <b>Arab tili marafoniga xush kelibsiz!</b>\n\n"
-            f"<blockquote>Marafonga qo'shilish uchun <b>{settings.required_referrals} ta do'stingizni</b> taklif qiling.</blockquote>\n"
-            f"👇 <i>Do'stlaringizni taklif qilish uchun pastdagi tayyor postni ularga forward qiling (uzating):</i>\n\n"
-            f"📊 <b>Taklif qilgan do'stlaringiz:</b> {result.user_referrals_count}/{settings.required_referrals}",
-        )
-
-        # Format promotional post text
-        try:
-            post_text = settings.share_text.format(link=my_link)
-        except Exception:
-            post_text = f"{settings.share_text}\n\n{my_link}"
-
-        delivered_media = False
-        if settings.photo_1 and settings.photo_2:
-            try:
-                media_group = [
-                    InputMediaPhoto(
-                        media=settings.photo_1,
-                        caption=post_text,
-                        parse_mode=ParseMode.HTML,
-                    ),
-                    InputMediaPhoto(media=settings.photo_2),
-                ]
-                res = await safe_send_media_group(bot, user_id, media_group)
-                if res:
-                    delivered_media = True
-            except Exception as e:
-                logger.warning(f"Media group failed for {user_id}: {e}")
-
-        if delivered_media:
-            # Telegram does not support attaching inline keyboards directly to media groups;
-            # send short follow-up message containing the inline sharing button directly below it
-            await safe_send(
-                bot,
-                user_id,
-                "👇 <b>Do'stlaringizga ulashish uchun quyidagi tugmani bosing:</b>",
-                reply_markup=share_kb,
-            )
-        else:
-            # Fallback text message with share button attached directly
-            await safe_send(
-                bot,
-                user_id,
-                post_text,
-                reply_markup=share_kb,
-                link_preview_options=NO_PREVIEW,
-            )
 
     @router.message(Command("admin", "panel"))
     async def cmd_unauthorized_admin(message: types.Message):
@@ -244,4 +148,170 @@ def create_user_router(
         )
 
     return router
+
+
+async def complete_registration_and_respond(
+    user_id: int,
+    bot: Bot,
+    settings: BotSettingsDocument,
+    referral_service: Optional[ReferralService] = None,
+    result: Optional[RegistrationResult] = None,
+    settings_repo: Optional[SettingsRepository] = None,
+):
+    """Complete registration atomically and deliver welcome, stats, promotional media, and share button."""
+    if result is None:
+        if referral_service is None:
+            raise ValueError("Either result or referral_service must be provided")
+        result = await referral_service.complete_registration(
+            user_id=user_id,
+            required_referrals=settings.required_referrals,
+        )
+
+    # Notify referrer if applicable
+    notif = result.referrer_notification
+    if notif:
+        rid = notif.referrer_id
+        count = notif.current_count
+        req = notif.required_count
+
+        if notif.kind == "success":
+            await safe_sticker(bot, rid, settings.success_sticker)
+            await safe_send(
+                bot,
+                rid,
+                f"🎉 <b>Tabriklaymiz!</b>\n"
+                f"<blockquote>Siz {req} ta do'stingizni taklif qildingiz va shartni bajardingiz.</blockquote>\n"
+                f"👇 <b>Marafon bo'ladigan yopiq kanalga kirish uchun havola:</b>\n{settings.closed_channel_link}",
+                link_preview_options=NO_PREVIEW,
+            )
+        elif notif.kind == "progress":
+            await safe_send(
+                bot,
+                rid,
+                f"👤 <b>Yangi do'stingiz</b> sizning havolangiz orqali botga kirdi!\n\n"
+                f"📈 Hozirgi takliflaringiz soni: <b>{count}/{req}</b> ta.",
+            )
+        elif notif.kind == "extra_progress":
+            await safe_send(
+                bot,
+                rid,
+                f"👤 <b>Yangi do'stingiz</b> sizning havolangiz orqali botga kirdi!\n\n"
+                f"📈 Hozirgi takliflaringiz soni: <b>{count}</b> ta.",
+            )
+
+    # Build personalized referral and share links
+    bot_info = await bot.get_me()
+    bot_username = bot_info.username or "ArabiyaBoost_bot"
+    my_link, share_url = build_share_url(bot_username, user_id)
+    share_kb = get_share_keyboard(share_url)
+
+    if result.is_completed:
+        await safe_send(
+            bot,
+            user_id,
+            f"✅ <b>Siz kerakli miqdordagi do'stlaringizni taklif qilgansiz!</b>\n\n"
+            f"<blockquote>Marafonga kirish uchun ssilka: {settings.closed_channel_link}</blockquote>\n"
+            f"📊 Jami takliflaringiz: <b>{result.user_referrals_count} ta.</b>",
+            reply_markup=share_kb,
+            link_preview_options=NO_PREVIEW,
+        )
+        return
+
+    await safe_send(
+        bot,
+        user_id,
+        f"🌟 <b>Arab tili marafoniga xush kelibsiz!</b>\n\n"
+        f"<blockquote>Marafonga qo'shilish uchun <b>{settings.required_referrals} ta do'stingizni</b> taklif qiling.</blockquote>\n"
+        f"👇 <i>Do'stlaringizni taklif qilish uchun pastdagi tayyor postni ularga forward qiling (uzating):</i>\n\n"
+        f"📊 <b>Taklif qilgan do'stlaringiz:</b> {result.user_referrals_count}/{settings.required_referrals}",
+    )
+
+    # Format promotional post text
+    try:
+        post_text = settings.share_text.format(link=my_link)
+    except Exception:
+        post_text = f"{settings.share_text}\n\n{my_link}"
+
+    # Clean promotional images list
+    promo_images = [
+        img for img in getattr(settings, "promo_images", []) if img and str(img).strip()
+    ]
+
+    delivered_media = False
+    if len(promo_images) == 1:
+        try:
+            # 1 image: send via safe_send_photo
+            if len(post_text) <= 1024:
+                msg = await safe_send_photo(
+                    bot,
+                    user_id,
+                    photo=promo_images[0],
+                    caption=post_text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=share_kb,
+                )
+                if msg:
+                    delivered_media = True
+            else:
+                msg = await safe_send_photo(bot, user_id, photo=promo_images[0])
+                if msg:
+                    delivered_media = True
+                    await safe_send(
+                        bot,
+                        user_id,
+                        post_text,
+                        reply_markup=share_kb,
+                        link_preview_options=NO_PREVIEW,
+                    )
+        except Exception as e:
+            logger.warning(f"Promotional single photo delivery failed for {user_id}: {e}")
+
+    elif len(promo_images) >= 2:
+        try:
+            # Multiple images (max 10 for Telegram sendMediaGroup)
+            images_to_send = promo_images[:10]
+            if len(post_text) <= 1024:
+                media_group = [
+                    InputMediaPhoto(
+                        media=images_to_send[0],
+                        caption=post_text,
+                        parse_mode=ParseMode.HTML,
+                    )
+                ] + [InputMediaPhoto(media=fid) for fid in images_to_send[1:]]
+                res_media = await safe_send_media_group(bot, user_id, media_group)
+                if res_media:
+                    delivered_media = True
+                    # Telegram does not support attaching inline keyboards directly to media groups;
+                    # send short follow-up message containing the inline sharing button directly below it
+                    await safe_send(
+                        bot,
+                        user_id,
+                        "👇 <b>Do'stlarga ulashish uchun quyidagi tugmani bosing:</b>",
+                        reply_markup=share_kb,
+                    )
+            else:
+                media_group = [InputMediaPhoto(media=fid) for fid in images_to_send]
+                res_media = await safe_send_media_group(bot, user_id, media_group)
+                if res_media:
+                    delivered_media = True
+                    await safe_send(
+                        bot,
+                        user_id,
+                        post_text,
+                        reply_markup=share_kb,
+                        link_preview_options=NO_PREVIEW,
+                    )
+        except Exception as e:
+            logger.warning(f"Promotional media group delivery failed for {user_id}: {e}")
+
+    if not delivered_media:
+        # 0 images configured, or media sending failed:
+        # Deliver promotional text directly with share button attached
+        await safe_send(
+            bot,
+            user_id,
+            post_text,
+            reply_markup=share_kb,
+            link_preview_options=NO_PREVIEW,
+        )
 

@@ -337,8 +337,7 @@ class SettingsRepository:
             admins_initialized=True,
             share_text=fallback.share_text,
             start_message=DEFAULT_START_MESSAGE,
-            photo_1=fallback.photo_1,
-            photo_2=fallback.photo_2,
+            promo_images=[],
             welcome_sticker=fallback.welcome_sticker,
             success_sticker=fallback.success_sticker,
             updated_at=utc_now(),
@@ -459,4 +458,47 @@ class SettingsRepository:
             return user_id in doc.get("admin_ids", [])
         # Fallback if DB is not yet initialized
         return user_id in config.admin_ids
+
+    # ==========================================================================
+    # Promotional Images Management
+    # ==========================================================================
+
+    async def get_promo_images(self) -> List[str]:
+        """Retrieve list of promotional image Telegram file IDs."""
+        doc = await self.collection.find_one({"key": self.SETTINGS_KEY})
+        if doc and "promo_images" in doc:
+            return list(doc.get("promo_images", []))
+        return []
+
+    async def add_promo_image(self, file_id: str) -> BotSettingsDocument:
+        """Add a promotional image Telegram file ID if not already present."""
+        clean_id = file_id.strip()
+        doc = await self.collection.find_one({"key": self.SETTINGS_KEY})
+        current_images = list(doc.get("promo_images", [])) if doc else []
+        if clean_id not in current_images:
+            current_images.append(clean_id)
+        return await self.update_settings({"promo_images": current_images})
+
+    async def remove_promo_image(self, file_id: str) -> BotSettingsDocument:
+        """Remove a promotional image by its file ID."""
+        clean_id = file_id.strip()
+        doc = await self.collection.find_one({"key": self.SETTINGS_KEY})
+        current_images = list(doc.get("promo_images", [])) if doc else []
+        filtered = [fid for fid in current_images if fid != clean_id]
+        return await self.update_settings({"promo_images": filtered})
+
+    async def remove_promo_image_by_index(self, index: int) -> BotSettingsDocument:
+        """Remove a promotional image by its 0-based index."""
+        doc = await self.collection.find_one({"key": self.SETTINGS_KEY})
+        current_images = list(doc.get("promo_images", [])) if doc else []
+        if 0 <= index < len(current_images):
+            current_images.pop(index)
+            return await self.update_settings({"promo_images": current_images})
+        return BotSettingsDocument.model_validate(doc) if doc else BotSettingsDocument(
+            closed_channel_link="https://t.me/+example", share_text=""
+        )
+
+    async def clear_promo_images(self) -> BotSettingsDocument:
+        """Clear all promotional images."""
+        return await self.update_settings({"promo_images": []})
 
