@@ -19,6 +19,14 @@ async def safe_send(
     try:
         return await bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
+        err_msg = str(e).lower()
+        if "parse" in err_msg or "entity" in err_msg or "entities" in err_msg:
+            try:
+                kw = dict(kwargs)
+                kw["parse_mode"] = None
+                return await bot.send_message(chat_id, text, **kw)
+            except Exception as e2:
+                logger.warning(f"Fallback plain text message to {chat_id} failed: {e2}")
         logger.warning(f"Could not send message to {chat_id}: {e}")
         return None
 
@@ -43,6 +51,24 @@ async def safe_send_media_group(
     try:
         return await bot.send_media_group(chat_id=chat_id, media=media)
     except Exception as e:
+        err_msg = str(e).lower()
+        if "parse" in err_msg or "entity" in err_msg or "entities" in err_msg:
+            try:
+                fallback_media = []
+                for item in media:
+                    if isinstance(item, InputMediaPhoto):
+                        fallback_media.append(
+                            InputMediaPhoto(
+                                media=item.media,
+                                caption=item.caption,
+                                parse_mode=None,
+                            )
+                        )
+                    else:
+                        fallback_media.append(item)
+                return await bot.send_media_group(chat_id=chat_id, media=fallback_media)
+            except Exception as e2:
+                logger.warning(f"Fallback plain text media group to {chat_id} failed: {e2}")
         logger.warning(f"Media group delivery failed for {chat_id}: {e}")
         return None
 
@@ -58,6 +84,14 @@ async def safe_send_photo(
     try:
         return await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, **kwargs)
     except Exception as e:
+        err_msg = str(e).lower()
+        if caption and ("parse" in err_msg or "entity" in err_msg or "entities" in err_msg):
+            try:
+                kw = dict(kwargs)
+                kw["parse_mode"] = None
+                return await bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, **kw)
+            except Exception as e2:
+                logger.warning(f"Fallback plain text photo to {chat_id} failed: {e2}")
         logger.warning(f"Could not send photo to {chat_id}: {e}")
         return None
 

@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import InputMediaPhoto
 
-from config import BotConfig, DEFAULT_START_MESSAGE
+from config import BotConfig, DEFAULT_SHARE_TEXT, DEFAULT_START_MESSAGE
 from database.models import BotSettingsDocument
 from database.repository import SettingsRepository, UserRepository
 from keyboards.user_keyboards import build_share_url, get_share_keyboard, get_sub_keyboard
@@ -62,14 +62,24 @@ def create_user_router(
             # User has not yet joined all mandatory channels; send channel links without manual confirmation button
             await safe_sticker(bot, user_id, settings.welcome_sticker)
             text = settings.start_message or DEFAULT_START_MESSAGE
-            await message.answer(
-                text,
-                reply_markup=get_sub_keyboard(settings.mandatory_channels),
-            )
+            try:
+                await message.answer(
+                    text,
+                    reply_markup=get_sub_keyboard(settings.mandatory_channels),
+                )
+            except Exception:
+                try:
+                    await message.answer(
+                        text,
+                        reply_markup=get_sub_keyboard(settings.mandatory_channels),
+                        parse_mode=None,
+                    )
+                except Exception as err:
+                    logger.error(f"Failed to deliver fallback start message to {user_id}: {err}")
             return
 
         # If already subscribed to every required channel, complete immediately
-        await complete_registration_and_respond(user_id=user_id, bot=bot, settings=settings)
+        await _complete_registration(user_id=user_id, bot=bot, settings=settings)
 
     @router.chat_member()
     async def chat_member_updated_handler(event: types.ChatMemberUpdated, bot: Bot):
@@ -101,7 +111,7 @@ def create_user_router(
         if is_sub:
             user = await user_repo.get_user(user_id)
             if user and user.get("status") == "pending":
-                await complete_registration_and_respond(user_id=user_id, bot=bot, settings=settings)
+                await _complete_registration(user_id=user_id, bot=bot, settings=settings)
 
     @router.callback_query(F.data.startswith("checksub_"))
     async def fallback_check_sub_handler(call: types.CallbackQuery, bot: Bot):
@@ -136,6 +146,8 @@ def create_user_router(
             bot=bot,
             settings=settings,
             referral_service=referral_service,
+            user_repo=user_repo,
+            settings_repo=settings_repo,
         )
 
     @router.message(Command("admin", "panel"))
@@ -157,15 +169,35 @@ async def complete_registration_and_respond(
     referral_service: Optional[ReferralService] = None,
     result: Optional[RegistrationResult] = None,
     settings_repo: Optional[SettingsRepository] = None,
+    user_repo: Optional[UserRepository] = None,
 ):
     """Complete registration atomically and deliver welcome, stats, promotional media, and share button."""
     if result is None:
         if referral_service is None:
-            raise ValueError("Either result or referral_service must be provided")
-        result = await referral_service.complete_registration(
-            user_id=user_id,
-            required_referrals=settings.required_referrals,
-        )
+            if user_repo is not None:
+                referral_service = ReferralService(user_repo)
+            else:
+                try:
+                    from database.connection import get_database
+                    db = get_database()
+                    if db is not None:
+                        referral_service = ReferralService(UserRepository(db))
+                except Exception as e:
+                    logger.warning(f"Could not initialize fallback ReferralService: {e}")
+
+        if referral_service is not None:
+            result = await referral_service.complete_registration(
+                user_id=user_id,
+                required_referrals=settings.required_referrals,
+            )
+        else:
+            logger.warning(f"Completing registration for user {user_id} with fallback RegistrationResult")
+            result = RegistrationResult(
+                is_new_user=False,
+                user_referrals_count=0,
+                is_completed=False,
+                referrer_notification=None,
+            )
 
     # Notify referrer if applicable
     notif = result.referrer_notification
@@ -227,10 +259,14 @@ async def complete_registration_and_respond(
     )
 
     # Format promotional post text
-    try:
-        post_text = settings.share_text.format(link=my_link)
-    except Exception:
-        post_text = f"{settings.share_text}\n\n{my_link}"
+    share_template = settings.share_text or DEFAULT_SHARE_TEXT
+    if "{link}" in share_template:
+        post_text = share_template.replace("{link}", my_link)
+    else:
+        try:
+            post_text = share_template.format(link=my_link)
+        except Exception:
+            post_text = f"{share_template}\n\n{my_link}"
 
     # Clean promotional images list
     promo_images = [

@@ -436,7 +436,17 @@ def create_admin_router(
             "────────────────────\n"
             "Ushbu xabarni yangi /start xabari sifatida saqlashni tasdiqlaysizmi?"
         )
-        await message.answer(preview_text, reply_markup=get_confirm_start_message_keyboard())
+        try:
+            await message.answer(preview_text, reply_markup=get_confirm_start_message_keyboard())
+        except Exception as e:
+            await message.answer(
+                f"⚠️ Matnda HTML formatlash xatosi mavjud: {e}\n\n"
+                f"Xabar:\n{text}\n\n"
+                "Iltimos, HTML teglarni to'g'rilab (yoki oddiy matn ko'rinishida) qayta yuboring:",
+                parse_mode=None,
+                reply_markup=get_cancel_to_start_msg_keyboard(),
+            )
+            await state.set_state(AdminStates.waiting_for_start_message)
 
     @router.callback_query(F.data == "admin_start_msg_confirm", AdminStates.waiting_for_start_message_confirm)
     async def cb_start_message_confirm(call: types.CallbackQuery, state: FSMContext):
@@ -864,7 +874,95 @@ def create_admin_router(
             await call.message.answer(text, reply_markup=get_admin_media_keyboard())
         await call.answer()
 
-    # ---------- 4.1. Promotional Images Management ----------
+    # ---------- 4.1. Promotional Message (Asosiy xabar) ----------
+    @router.callback_query(F.data.in_(["admin_edit_promo", "admin_set_share_text"]))
+    async def cb_edit_promo_text(call: types.CallbackQuery, state: FSMContext):
+        await state.set_state(AdminStates.waiting_for_promo_text)
+        text = (
+            "📝 <b>Asosiy xabarni tahrirlash</b>\n\n"
+            "Yangi asosiy reklama posti xabarini yuboring.\n\n"
+            "💡 <i>Qalin (bold), kursiv (italic), havola (link), blockquote va boshqa Telegram HTML teglari to'liq qo'llab-quvvatlanadi.</i>\n\n"
+            "❗️ <b>Muhim:</b> Matnda foydalanuvchining shaxsiy taklif havolasi joylashishi uchun "
+            "<code>{link}</code> tegini qoldirishni unutmang!\n\n"
+            "<i>Masalan: &lt;a href=\"{link}\"&gt;Botdan ro'yxatdan o'ting va marafonga qo'shiling.&lt;/a&gt;</i>"
+        )
+        try:
+            await call.message.edit_text(text, reply_markup=get_cancel_keyboard())
+        except Exception:
+            await call.message.answer(text, reply_markup=get_cancel_keyboard())
+        await call.answer()
+
+    @router.message(AdminStates.waiting_for_promo_text)
+    @router.message(AdminStates.waiting_for_share_text)
+    async def msg_receive_promo_text(message: types.Message, state: FSMContext, bot: Bot):
+        text = (message.html_text or message.text or "").strip()
+        if not text:
+            await message.answer(
+                "❌ Bo'sh bo'lmagan xabar yuboring:",
+                reply_markup=get_cancel_keyboard(),
+            )
+            return
+
+        if "{link}" not in text:
+            await message.answer(
+                "❌ Xabarda <code>{link}</code> tegi bo'lishi shart!\n\n"
+                "Ushbu teg o'rniga har bir foydalanuvchining shaxsiy referal havolasi qo'yiladi. "
+                "Iltimos, <code>{link}</code> tegini qoldirib qayta yuboring:",
+                reply_markup=get_cancel_keyboard(),
+            )
+            return
+
+        # Validate that preview format succeeds with sample link
+        bot_info = await bot.get_me()
+        bot_username = bot_info.username or "ArabiyaBoost_bot"
+        sample_link = f"https://t.me/{bot_username}?start=123456789"
+        preview_formatted = text.replace("{link}", sample_link)
+
+        await state.update_data(pending_promo_text=text)
+        await state.set_state(AdminStates.waiting_for_promo_confirm)
+
+        preview_msg = (
+            "👁 <b>Yangi xabar ko'rinishi (Preview):</b>\n\n"
+            f"{preview_formatted}\n\n"
+            "────────────────────\n"
+            "Ushbu xabarni asosiy reklama posti sifatida saqlashni tasdiqlaysizmi?"
+        )
+        try:
+            await message.answer(preview_msg, reply_markup=get_promo_preview_keyboard())
+        except Exception as e:
+            await message.answer(
+                f"⚠️ Matnda HTML formatlash xatosi mavjud: {e}\n\n"
+                f"Xabar:\n{text}\n\n"
+                "Iltimos, HTML teglarni to'g'rilab qayta yuboring:",
+                parse_mode=None,
+                reply_markup=get_cancel_keyboard(),
+            )
+            await state.set_state(AdminStates.waiting_for_promo_text)
+
+    @router.callback_query(F.data == "admin_promo_confirm", AdminStates.waiting_for_promo_confirm)
+    async def cb_promo_confirm(call: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        new_text = data.get("pending_promo_text")
+        await state.clear()
+
+        if not new_text:
+            await call.answer("Xatolik: Yangi matn topilmadi.", show_alert=True)
+            await cb_admin_main(call, state)
+            return
+
+        await settings_repo.update_settings({"share_text": new_text})
+        success_text = (
+            "✅ <b>Asosiy reklama xabari muvaffaqiyatli saqlandi!</b>\n\n"
+            "Yangi xabar darhol kuchga kirdi va barcha yangi foydalanuvchilarga yuboriladi. "
+            "U bot qayta ishga tushganda ham MongoDB da saqlanib qoladi."
+        )
+        try:
+            await call.message.edit_text(success_text, reply_markup=get_admin_main_keyboard())
+        except Exception:
+            await call.message.answer(success_text, reply_markup=get_admin_main_keyboard())
+        await call.answer("Muvaffaqiyatli saqlandi!")
+
+    # ---------- 4.2. Promotional Images Management ----------
     @router.callback_query(F.data == "admin_promo_images")
     async def cb_admin_promo_images(call: types.CallbackQuery, state: FSMContext):
         await state.clear()
