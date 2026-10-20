@@ -305,9 +305,9 @@ def test_user_delivery_modes_and_sharing_buttons(promo_setup):
         promo_call = bot_mock.send_message.call_args_list[-1]
         sent_text = promo_call[0][1]
         sent_kb = promo_call[1]["reply_markup"]
-        assert f"https://t.me/TestArabTiliBot?start={user_id}" in sent_text
         assert sent_kb is not None
         assert "Do'stlarga ulashish" in str(sent_kb)
+        assert f"start%3D{user_id}" in str(sent_kb) or f"start={user_id}" in str(sent_kb)
 
         # Case B: 1 image configured
         bot_mock.reset_mock()
@@ -332,9 +332,9 @@ def test_user_delivery_modes_and_sharing_buttons(promo_setup):
         bot_mock.send_photo.assert_called_once()
         photo_kwargs = bot_mock.send_photo.call_args[1]
         assert photo_kwargs["photo"] == "single_promo_file_id"
-        assert f"https://t.me/TestArabTiliBot?start={user_id}" in photo_kwargs["caption"]
         assert photo_kwargs["reply_markup"] is not None
         assert "Do'stlarga ulashish" in str(photo_kwargs["reply_markup"])
+        assert f"start%3D{user_id}" in str(photo_kwargs["reply_markup"]) or f"start={user_id}" in str(photo_kwargs["reply_markup"])
         # No media group called
         bot_mock.send_media_group.assert_not_called()
         # Welcome message sent once, no duplicate promo message sent
@@ -365,7 +365,7 @@ def test_user_delivery_modes_and_sharing_buttons(promo_setup):
         media_group = bot_mock.send_media_group.call_args[1]["media"]
         assert len(media_group) == 3
         assert media_group[0].media == "single_promo_file_id"
-        assert f"https://t.me/TestArabTiliBot?start={user_id}" in media_group[0].caption
+        assert "ARAB TILI MARAFONI" in media_group[0].caption
         assert media_group[1].media == "second_promo_file_id"
         assert media_group[2].media == "third_promo_file_id"
 
@@ -374,6 +374,7 @@ def test_user_delivery_modes_and_sharing_buttons(promo_setup):
         followup_call = bot_mock.send_message.call_args_list[-1]
         assert "Do'stlarga ulashish" in followup_call[0][1] or "quyidagi tugmani bosing" in followup_call[0][1]
         assert followup_call[1]["reply_markup"] is not None
+        assert f"start%3D{user_id}" in str(followup_call[1]["reply_markup"]) or f"start={user_id}" in str(followup_call[1]["reply_markup"])
 
     asyncio.run(_test())
 
@@ -415,8 +416,9 @@ def test_telegram_error_fallback_without_duplicates(promo_setup):
         # Fallback text was delivered safely
         assert bot_mock.send_message.call_count == 2
         fallback_msg = bot_mock.send_message.call_args_list[-1]
-        assert f"https://t.me/TestArabTiliBot?start={user_id}" in fallback_msg[0][1]
         assert fallback_msg[1]["reply_markup"] is not None
+        assert "Do'stlarga ulashish" in str(fallback_msg[1]["reply_markup"])
+        assert f"start%3D{user_id}" in str(fallback_msg[1]["reply_markup"]) or f"start={user_id}" in str(fallback_msg[1]["reply_markup"])
 
         # 2. Album rejection fallback
         bot_mock.reset_mock()
@@ -441,8 +443,9 @@ def test_telegram_error_fallback_without_duplicates(promo_setup):
         # 1st call: welcome message, 2nd call: promotional text with share button
         assert bot_mock.send_message.call_count == 2
         album_fallback = bot_mock.send_message.call_args_list[-1]
-        assert f"https://t.me/TestArabTiliBot?start={user_id}" in album_fallback[0][1]
         assert album_fallback[1]["reply_markup"] is not None
+        assert "Do'stlarga ulashish" in str(album_fallback[1]["reply_markup"])
+        assert f"start%3D{user_id}" in str(album_fallback[1]["reply_markup"]) or f"start={user_id}" in str(album_fallback[1]["reply_markup"])
 
     asyncio.run(_test())
 

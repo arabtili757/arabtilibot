@@ -263,10 +263,7 @@ async def complete_registration_and_respond(
     if "{link}" in share_template:
         post_text = share_template.replace("{link}", my_link)
     else:
-        try:
-            post_text = share_template.format(link=my_link)
-        except Exception:
-            post_text = f"{share_template}\n\n{my_link}"
+        post_text = share_template
 
     # Clean promotional images list
     promo_images = [

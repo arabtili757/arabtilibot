@@ -79,10 +79,11 @@ def test_subscribed_user_start_command_does_not_raise_value_error(test_env):
         assert bot_mock.send_message.call_count >= 2
         calls = [c[0][1] for c in bot_mock.send_message.call_args_list]
         welcome_call = calls[0]
-        promo_call = calls[1]
-
         assert "Arab tili marafoniga xush kelibsiz" in welcome_call
-        assert f"https://t.me/TestArabBot?start={user_id}" in promo_call
+        promo_kb = bot_mock.send_message.call_args_list[1][1]["reply_markup"]
+        assert promo_kb is not None
+        assert "Do'stlarga ulashish" in str(promo_kb)
+        assert f"start%3D{user_id}" in str(promo_kb) or f"start={user_id}" in str(promo_kb)
 
     asyncio.run(_test())
 
@@ -309,5 +310,118 @@ def test_safe_send_html_parse_fallback():
         # Second call should have parse_mode=None
         second_call_kw = bot_mock.send_message.call_args_list[1][1]
         assert second_call_kw.get("parse_mode") is None
+
+    asyncio.run(_test())
+
+
+def test_admin_edit_promotional_text_without_link_placeholder(test_env):
+    """Ensure admin can submit advertisement text WITHOUT any {link} placeholder,
+
+    it saves cleanly, preserves HTML (bold, italic, blockquote), and /start attaches
+    the 'Do'stlarga ulashish' button below the message.
+    """
+    async def _test():
+        cfg = test_env["cfg"]
+        user_repo = test_env["user_repo"]
+        settings_repo = test_env["settings_repo"]
+        broadcast_service = test_env["broadcast_service"]
+
+        await settings_repo.get_settings(cfg)
+        admin_router = create_admin_router(cfg, user_repo, settings_repo, broadcast_service)
+        user_router = create_user_router(cfg, user_repo, settings_repo)
+
+        edit_button_handler = None
+        input_handler = None
+        confirm_handler = None
+
+        for handler in admin_router.callback_query.handlers:
+            name = getattr(handler.callback, "__name__", "")
+            if name == "cb_edit_promo_text":
+                edit_button_handler = handler.callback
+            elif name == "cb_promo_confirm":
+                confirm_handler = handler.callback
+
+        for handler in admin_router.message.handlers:
+            if getattr(handler.callback, "__name__", "") == "msg_receive_promo_text":
+                input_handler = handler.callback
+
+        # 1. Admin inputs text with bold, italic, blockquote, but ZERO {link}
+        plain_formatted_text = (
+            "ARAB TILI MARAFONI 💡\n\n"
+            "<b>15 KUNDA A1 DAN A2 SARI</b> 📈\n"
+            "<i>Marafon boshlanish sanasi: 26-oktabr!</i>\n"
+            "<blockquote>Faqat ayol va qizlar qo'shilsin</blockquote>\n\n"
+            "Botdan ro'yxatdan o'ting va marafonga qo'shiling. 🤍"
+        )
+        assert "{link}" not in plain_formatted_text
+
+        msg_promo = MagicMock()
+        msg_promo.from_user.id = 5924300834
+        msg_promo.html_text = plain_formatted_text
+        msg_promo.text = plain_formatted_text
+        msg_promo.answer = AsyncMock()
+
+        state = MagicMock()
+        state.update_data = AsyncMock()
+        state.set_state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"pending_promo_text": plain_formatted_text})
+        state.clear = AsyncMock()
+
+        bot_mock = MagicMock()
+        bot_mock.get_me = AsyncMock(return_value=MagicMock(username="ArabiyaBoost_bot"))
+        bot_mock.send_message = AsyncMock(return_value=MagicMock())
+
+        # Must NOT reject message or ask for {link}!
+        await input_handler(msg_promo, state, bot_mock)
+        state.update_data.assert_called_with(pending_promo_text=plain_formatted_text)
+        state.set_state.assert_called_with(AdminStates.waiting_for_promo_confirm)
+
+        # Confirm save
+        cb_confirm = MagicMock()
+        cb_confirm.from_user.id = 5924300834
+        cb_confirm.answer = AsyncMock()
+        cb_confirm.message.edit_text = AsyncMock()
+        await confirm_handler(cb_confirm, state)
+
+        updated_settings = await settings_repo.get_settings(cfg)
+        assert updated_settings.share_text == plain_formatted_text
+
+        # 2. User sends /start and receives exact advertisement text with "Do'stlarga ulashish" button
+        start_handler = None
+        for handler in user_router.message.handlers:
+            if getattr(handler.callback, "__name__", "") == "command_start_handler":
+                start_handler = handler.callback
+                break
+
+        user_id = 123456789
+        user_msg = MagicMock()
+        user_msg.from_user.id = user_id
+        cmd_obj = MagicMock()
+        cmd_obj.args = None
+
+        bot_mock.reset_mock()
+        bot_mock.get_me = AsyncMock(return_value=MagicMock(username="ArabiyaBoost_bot"))
+        bot_mock.send_message = AsyncMock(return_value=MagicMock())
+
+        with patch.object(SubscriptionService, "is_subscribed", AsyncMock(return_value=True)):
+            await start_handler(user_msg, cmd_obj, bot_mock)
+
+        # Delivered promotional message
+        promo_call = bot_mock.send_message.call_args_list[-1]
+        sent_text = promo_call[0][1]
+        sent_kb = promo_call[1]["reply_markup"]
+
+        # Text matches exact formatting without forced link string appended
+        assert sent_text == plain_formatted_text
+        assert "<b>15 KUNDA A1 DAN A2 SARI</b>" in sent_text
+        assert "<blockquote>Faqat ayol va qizlar qo'shilsin</blockquote>" in sent_text
+
+        # "Do'stlarga ulashish" button is automatically attached with user's personal referral link
+        assert sent_kb is not None
+        button = sent_kb.inline_keyboard[0][0]
+        assert "Do'stlarga ulashish" in button.text
+        from urllib.parse import unquote
+        assert f"https://t.me/ArabiyaBoost_bot?start={user_id}" in unquote(button.url)
+        assert button.url.startswith("https://t.me/share/url?url=")
 
     asyncio.run(_test())

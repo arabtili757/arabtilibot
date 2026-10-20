@@ -25,7 +25,7 @@ DEFAULT_SHARE_TEXT = (
     "-Arab harflarini o'qiy olasiz, yoza olasiz, lekin grammatikani\n"
     "bilmaysiz va arabcha jumla tuza olmaysizmi?\n\n"
     "\"Unda bu marafon aynan siz uchun!\"\n\n"
-    "Marafon boshlanish sanasi : 20 - oktabr ! 3 nafar professional ayol ustoza bilan\n"
+    "Marafon boshlanish sanasi : 26 - oktabr ! 3 nafar professional ayol ustoza bilan\n"
     "<blockquote>Faqat ayol va qizlar qo'shilsin</blockquote>\n\n"
     "- Marafonda qatnashish : mutlaqo BEPUL ✅\n\n"
     "❓ Marafonda nimalarni o'rganasiz?\n\n"
@@ -34,7 +34,7 @@ DEFAULT_SHARE_TEXT = (
     "- Sodda va tushunarli gaplar tuzish</blockquote>\n\n"
     "🔅 Marafon oxirida <b>sertifikat va pul mukofoti</b> kutib turibdi.\n\n"
     "⛔️ Diqqat qiling : marafon faqat o'qish va yozishni biladigan talabalar uchun!\n\n"
-    '<a href="{link}">Botdan ro\'yxatdan o\'ting va marafonga qo\'shiling.</a> 🤍'
+    "Botdan ro'yxatdan o'ting va marafonga qo'shiling. 🤍"
 )
 
 DEFAULT_START_MESSAGE = (

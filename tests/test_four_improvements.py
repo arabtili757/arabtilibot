@@ -368,13 +368,13 @@ def test_admin_promo_text_validation_and_persistence():
 
         settings = await settings_repo.get_settings(config)
         original_text = settings.share_text
-        assert "{link}" in original_text
+        assert "ARAB TILI MARAFONI" in original_text
 
-        # Validate replacement text must contain {link}
-        invalid_text = "Marafon boshlanmoqda! Qo'shiling!"
-        assert "{link}" not in invalid_text
+        # Validate replacement text does not require {link}
+        plain_text = "Marafon boshlanmoqda! Qo'shiling!"
+        assert "{link}" not in plain_text
 
-        # Valid replacement text with HTML formatting and {link}
+        # Valid replacement text with HTML formatting (supports optional {link} or plain text)
         new_text = (
             "🚀 <b>YANGILANGAN MARAFON</b>\n\n"
             "Arab tili noldan boshlanmoqda.\n\n"

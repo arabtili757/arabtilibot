@@ -881,10 +881,8 @@ def create_admin_router(
         text = (
             "📝 <b>Asosiy xabarni tahrirlash</b>\n\n"
             "Yangi asosiy reklama posti xabarini yuboring.\n\n"
-            "💡 <i>Qalin (bold), kursiv (italic), havola (link), blockquote va boshqa Telegram HTML teglari to'liq qo'llab-quvvatlanadi.</i>\n\n"
-            "❗️ <b>Muhim:</b> Matnda foydalanuvchining shaxsiy taklif havolasi joylashishi uchun "
-            "<code>{link}</code> tegini qoldirishni unutmang!\n\n"
-            "<i>Masalan: &lt;a href=\"{link}\"&gt;Botdan ro'yxatdan o'ting va marafonga qo'shiling.&lt;/a&gt;</i>"
+            "💡 <i>Qalin (bold), kursiv (italic), havola (link), blockquote va boshqa Telegram formatlari to'liq qo'llab-quvvatlanadi.</i>\n\n"
+            "ℹ️ <i>Hech qanday maxsus teg yoki ssilka kiritish shart emas! Bot xabar ostiga har bir foydalanuvchining shaxsiy referal havolasi bilan <b>'Do'stlarga ulashish'</b> tugmasini avtomatik biriktiradi.</i>"
         )
         try:
             await call.message.edit_text(text, reply_markup=get_cancel_keyboard())
@@ -903,28 +901,21 @@ def create_admin_router(
             )
             return
 
-        if "{link}" not in text:
-            await message.answer(
-                "❌ Xabarda <code>{link}</code> tegi bo'lishi shart!\n\n"
-                "Ushbu teg o'rniga har bir foydalanuvchining shaxsiy referal havolasi qo'yiladi. "
-                "Iltimos, <code>{link}</code> tegini qoldirib qayta yuboring:",
-                reply_markup=get_cancel_keyboard(),
-            )
-            return
-
-        # Validate that preview format succeeds with sample link
+        # No mandatory {link} validation!
+        # If admin optionally included {link}, replace for preview, else use text directly
         bot_info = await bot.get_me()
         bot_username = bot_info.username or "ArabiyaBoost_bot"
         sample_link = f"https://t.me/{bot_username}?start=123456789"
-        preview_formatted = text.replace("{link}", sample_link)
+        preview_formatted = text.replace("{link}", sample_link) if "{link}" in text else text
 
         await state.update_data(pending_promo_text=text)
         await state.set_state(AdminStates.waiting_for_promo_confirm)
 
         preview_msg = (
-            "👁 <b>Yangi xabar ko'rinishi (Preview):</b>\n\n"
+            "👁 <b>Yangi reklama posti ko'rinishi (Preview):</b>\n\n"
             f"{preview_formatted}\n\n"
             "────────────────────\n"
+            "<i>(Xabar ostiga 'Do'stlarga ulashish' tugmasi avtomatik qo'shiladi)</i>\n\n"
             "Ushbu xabarni asosiy reklama posti sifatida saqlashni tasdiqlaysizmi?"
         )
         try:
