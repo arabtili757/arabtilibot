@@ -58,6 +58,8 @@ class DatabaseManager:
         # Users collection indexes
         users = self.db["users"]
         await users.create_index([("user_id", pymongo.ASCENDING)], unique=True)
+        await users.create_index([("status", pymongo.ASCENDING)])
+        await users.create_index([("registered_at", pymongo.ASCENDING)])
         await users.create_index([("referrer_id", pymongo.ASCENDING)])
         await users.create_index([("referrals_count", pymongo.DESCENDING)])
 

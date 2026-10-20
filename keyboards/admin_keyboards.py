@@ -13,6 +13,7 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats"))
     builder.row(types.InlineKeyboardButton(text="📢 Kanallarni boshqarish", callback_data="admin_channels"))
+    builder.row(types.InlineKeyboardButton(text="📝 Asosiy xabarni tahrirlash", callback_data="admin_edit_promo"))
     builder.row(types.InlineKeyboardButton(text="⚙️ Marafon sozlamalari", callback_data="admin_settings"))
     builder.row(types.InlineKeyboardButton(text="🖼 Media va Matnlar", callback_data="admin_media"))
     builder.row(types.InlineKeyboardButton(text="✉️ Xabar yuborish (Broadcast)", callback_data="admin_broadcast"))
@@ -63,7 +64,7 @@ def get_admin_settings_keyboard() -> InlineKeyboardMarkup:
 def get_admin_media_keyboard() -> InlineKeyboardMarkup:
     """Generate keyboard for editing share text, photos, and stickers."""
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="📝 Reklama matnini tahrirlash", callback_data="admin_set_share_text"))
+    builder.row(types.InlineKeyboardButton(text="📝 Asosiy xabarni tahrirlash", callback_data="admin_edit_promo"))
     builder.row(
         types.InlineKeyboardButton(text="🖼 Rasm 1 ID", callback_data="admin_set_photo1"),
         types.InlineKeyboardButton(text="🖼 Rasm 2 ID", callback_data="admin_set_photo2"),
@@ -72,6 +73,24 @@ def get_admin_media_keyboard() -> InlineKeyboardMarkup:
         types.InlineKeyboardButton(text="🌟 Xush kelibsiz stikeri", callback_data="admin_set_welcome_sticker"),
         types.InlineKeyboardButton(text="🎉 G'alaba stikeri", callback_data="admin_set_success_sticker"),
     )
+    builder.row(types.InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="admin_main"))
+    return builder.as_markup()
+
+
+def get_promo_preview_keyboard() -> InlineKeyboardMarkup:
+    """Confirmation keyboard for saving edited promotional message."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="admin_promo_confirm"),
+        types.InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_cancel_action"),
+    )
+    return builder.as_markup()
+
+
+def get_admin_stats_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard for admin statistics with refresh option."""
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔄 Yangilash", callback_data="admin_stats_refresh"))
     builder.row(types.InlineKeyboardButton(text="🔙 Asosiy menyu", callback_data="admin_main"))
     return builder.as_markup()
 

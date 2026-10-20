@@ -18,6 +18,10 @@ class UserDocument(BaseModel):
     user_id: int
     referrer_id: Optional[int] = None
     referrals_count: int = 0
+    pending_referrer_id: Optional[int] = None
+    status: str = "completed"  # "pending" or "completed"
+    registered_at: Optional[datetime] = None
+    is_currently_subscribed: Optional[bool] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

@@ -166,36 +166,60 @@ Administrators (`ADMIN_IDS`) have access to protected management tools:
 Send `/admin` or `/panel` in the Telegram bot chat. Unauthorized users are blocked from executing admin commands or clicking admin callback buttons.
 
 ### Workflows Available:
-1. **📊 Statistika (Statistics):**
-   * Total registered users.
-   * Users who completed the referral threshold.
-   * Pending users.
-   * Total referrals made.
-   * Top 5 referrers (with privacy-masked IDs: e.g. `885***3957: 5 ta`).
-   * Current status of mandatory subscription checks.
+1. **📊 Statistika (Accurate Admin Statistics):**
+   * **A. Foydalanuvchilar statistikasi:**
+     * Jami ro'yxatdan o'tgan foydalanuvchilar soni.
+     * Bugun ro'yxatdan o'tganlar (Toshkent vaqti - `Asia/Tashkent` bo'yicha).
+     * Oxirgi 7 kunda ro'yxatdan o'tganlar.
+     * Referal havola orqali ro'yxatdan o'tganlar soni.
+     * Marafonda ishtirok etish huquqiga ega (barcha majburiy kanallarga a'zo) foydalanuvchilar.
+     * Majburiy obunani to'liq bajarmagan / jarayondagi foydalanuvchilar.
+     * Sanasiz eski foydalanuvchilar (mavjud bo'lsa, alohida ko'rsatiladi).
+   * **B. Majburiy kanallar statistikasi:**
+     * Har bir kanal nomi va ID si.
+     * A'zo bo'lgan bot foydalanuvchilari soni.
+     * A'zo bo'lmagan foydalanuvchilar soni.
+     * A'zoligi tekshirib bo'lmaganlar (masalan, bot admin bo'lmagan holatlarda) alohida ko'rsatiladi.
+     * Botning kanaldagi admin huquqi holati va ogohlantirishlar.
+   * **C. Referal statistikasi:**
+     * Jami muvaffaqiyatli, noyob referallar (haqiqiy munosabatlar asosida).
+     * Barcha majburiy obunalarni bajargan taklif qilinganlar soni.
+     * Eng faol taklif qiluvchilar (Top 10) ro'yxati, takliflar soni va ularning shaxsiy havolalari (`https://t.me/ArabiyaBoost_bot?start=USER_ID`).
+   * **Keshlash va Yangilash:**
+     * Natijalar 5 daqiqa davomida keshlanadi va Telegram API cheklovlariga (flood limit) tushmaslik uchun navbat bilan tekshiriladi.
+     * `🔄 Yangilash` tugmasi orqali istalgan payt statistikani qayta tekshirish mumkin.
 
 2. **📢 Kanallarni Boshqarish (Channels Management):**
-   * **Toggle Check:** Enable or disable mandatory subscription checking with one click.
-   * **Add Channel:** Input `Name | Link | ChannelID`. Bot automatically tests administrative privileges in the channel.
-   * **Delete Channel:** Remove a channel with a confirmation prompt.
+   * **Avtomatik obunani tekshirish:** Foydalanuvchilar kanallarga a'zo bo'lishi bilanoq Telegram `chat_member` hodisasi orqali avtomatik ro'yxatdan o'tkaziladi (qo'shimcha tugma bosish shart emas).
+   * **MUHIM TELEGRAM TALABI:** Bot barcha majburiy kanallarda **administrator** (admin) huquqiga ega bo'lishi shart! Agar bot kanalda admin bo'lmasa, Telegram `chat_member` hodisalarini yetkazib bermaydi va a'zolikni tekshirib bo'lmaydi.
+   * **Toggle Check:** Majburiy obuna tekshirishni yoqish/o'chirish.
+   * **Add Channel:** Input `Name | Link | ChannelID`. Bot kanaldagi adminlik huquqini avtomatik tekshiradi.
+   * **Delete Channel:** Kanalni o'chirish.
 
-3. **⚙️ Marafon Sozlamalari (Marathon Settings):**
-   * Update referral threshold (e.g., change from 3 to 5).
-   * Update closed channel invite URL.
+3. **📝 Asosiy Xabarni Tahrirlash (Edit Promotional Message):**
+   * Admin panelidagi `📝 Asosiy xabarni tahrirlash` tugmasi orqali yangi reklama matni kiritiladi.
+   * Telegram HTML teglari (qalin, kursiv, havolalar, blockquote) to'liq qo'llab-quvvatlanadi.
+   * Matnda `{link}` tegi mavjudligi avtomatik tekshiriladi va foydalanuvchiga tasdiqlashdan oldin ko'rinishi (Preview) taqdim etiladi.
+   * `✅ Tasdiqlash` bosilganda matn MongoDB ga saqlanadi va botni qayta yoqmasdan darhol yangi foydalanuvchilarga ko'rsatiladi.
 
-4. **🖼 Media va Matnlar (Media & Texts):**
-   * Edit promotional share post text (validates `{link}` presence).
-   * Update photo file IDs (`PHOTO_1`, `PHOTO_2`).
-   * Update sticker file IDs (`WELCOME_STICKER`, `SUCCESS_STICKER`).
-   * *Admin Helper:* When an admin sends any photo or sticker to the bot, the bot replies with its Telegram `file_id`.
+4. **📤 Shaxsiy Do'stlarga Ulashish Tugmasi (Personalized Share Button):**
+   * Reklama posti ostida `📤 Do'stlarga ulashish` tugmasi joylashadi.
+   * Bosilganda Telegramning rasmiy chat tanlash oynasi ochiladi va avtomatik tayyor o'zbekcha matn kiritiladi:
+     `"Shu botga kirib ko'ring, zo'r ekan! Arab tili marafoniga qo'shiling!"`
+   * Har bir foydalanuvchining shaxsiy referal havolasi (`https://t.me/ArabiyaBoost_bot?start=USER_ID`) xavfsiz URL-kodlash orqali ulanadi.
+   * Ikki rasmli albom posti (media group) inline tugmalarni to'g'ridan-to'g'ri qabul qilmasligi sababli, tugma albomning darhol ketidan alohida qisqa xabar bilan yuboriladi.
 
-5. **✉️ Xabar Yuborish (Safe Broadcasting):**
-   * Send any post, image, text, or video to all registered users.
-   * Prompts with the exact recipient count and requires explicit confirmation.
-   * Rate-limited to ~25 messages/second to comply with Telegram flood limits.
-   * Handles blocked/deactivated users without interrupting delivery.
-   * Concurrency lock prevents accidental duplicate broadcasts.
-   * Generates a completion report: Total, Sent, Failed.
+5. **⚙️ Marafon Sozlamalari (Marathon Settings):**
+   * Referal chegarasini o'zgartirish (masalan, 3 tadan 5 taga).
+   * Yopiq kanal havolasini o'zgartirish.
+
+6. **🖼 Media va Matnlar (Media & Texts):**
+   * Rasm va stiker file ID larini o'zgartirish.
+   * *Admin Helper:* Admin botga rasm yoki stiker yuborsa, bot uning `file_id` sini qaytaradi.
+
+7. **✉️ Xabar Yuborish (Safe Broadcasting):**
+   * Barcha ro'yxatdan o'tgan foydalanuvchilarga xabar yuborish.
+   * Tasdiqlash, flood control va yakuniy hisobot.
 
 ---
 

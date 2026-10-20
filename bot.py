@@ -21,6 +21,7 @@ from database.repository import SettingsRepository, UserRepository
 from handlers.admin_handlers import create_admin_router
 from handlers.user_handlers import create_user_router
 from services.broadcast_service import BroadcastService
+from services.statistics_service import StatisticsService
 
 # Unbuffer output for real-time logs in cloud platforms (Render, Docker)
 if hasattr(sys.stdout, "reconfigure"):
@@ -118,11 +119,13 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage())
 
+    statistics_service = StatisticsService(user_repo, settings_repo)
     admin_router = create_admin_router(
         config=config,
         user_repo=user_repo,
         settings_repo=settings_repo,
         broadcast_service=broadcast_service,
+        statistics_service=statistics_service,
     )
     user_router = create_user_router(
         config=config,
@@ -136,8 +139,11 @@ async def main() -> None:
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         bot_user = await bot.get_me()
-        logger.info(f"Bot @{bot_user.username} started successfully.")
-        await dp.start_polling(bot)
+        allowed_updates = ["message", "callback_query", "chat_member"]
+        logger.info(
+            f"Bot @{bot_user.username} started successfully with allowed_updates={allowed_updates}."
+        )
+        await dp.start_polling(bot, allowed_updates=allowed_updates)
     finally:
         await http_runner.cleanup()
         if db_manager:

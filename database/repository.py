@@ -29,10 +29,87 @@ class UserRepository:
         doc = await self.collection.find_one({"user_id": user_id}, {"_id": 1})
         return doc is not None
 
+    async def save_pending_user(
+        self, user_id: int, pending_referrer_id: Optional[int] = None
+    ) -> tuple[bool, Dict[str, Any]]:
+        """Save a pending user registration if not already present.
+
+        Returns (is_new, user_dict). Preserves existing records and referral links.
+        """
+        existing = await self.get_user(user_id)
+        if existing:
+            return False, existing
+
+        now = utc_now()
+        doc = {
+            "user_id": user_id,
+            "referrer_id": None,
+            "pending_referrer_id": pending_referrer_id,
+            "referrals_count": 0,
+            "status": "pending",
+            "registered_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await self.collection.update_one(
+            {"user_id": user_id},
+            {"$setOnInsert": doc},
+            upsert=True,
+        )
+        user = await self.get_user(user_id)
+        return True, user or doc
+
+    async def complete_user_registration(
+        self, user_id: int, referrer_id: Optional[int] = None
+    ) -> tuple[bool, Dict[str, Any]]:
+        """Atomically transition user from pending to completed.
+
+        Returns (just_completed, user_dict).
+        If user was already completed, returns (False, user_dict).
+        """
+        now = utc_now()
+        set_fields: Dict[str, Any] = {
+            "status": "completed",
+            "registered_at": now,
+            "updated_at": now,
+        }
+        if referrer_id is not None:
+            set_fields["referrer_id"] = referrer_id
+
+        # Atomic transition where status == 'pending'
+        result = await self.collection.find_one_and_update(
+            {"user_id": user_id, "status": "pending"},
+            {
+                "$set": set_fields,
+                "$unset": {"pending_referrer_id": ""},
+            },
+            return_document=pymongo.ReturnDocument.AFTER,
+        )
+        if result:
+            return True, result
+
+        # User was already completed or not in pending state
+        user = await self.get_user(user_id)
+        return False, user or {}
+
+    async def update_subscription_status(
+        self, user_id: int, is_subscribed: bool
+    ) -> None:
+        """Update cached channel subscription status for a user."""
+        await self.collection.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "is_currently_subscribed": is_subscribed,
+                    "updated_at": utc_now(),
+                }
+            },
+        )
+
     async def create_user(
         self, user_id: int, referrer_id: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Safely create a new user. Idempotent if user already exists."""
+        """Safely create a new completed user. Idempotent if user already exists."""
         now = utc_now()
         await self.collection.update_one(
             {"user_id": user_id},
@@ -41,6 +118,8 @@ class UserRepository:
                     "user_id": user_id,
                     "referrer_id": referrer_id,
                     "referrals_count": 0,
+                    "status": "completed",
+                    "registered_at": now,
                     "created_at": now,
                 },
                 "$set": {
@@ -76,8 +155,73 @@ class UserRepository:
             return int(doc["referrals_count"])
         return 0
 
+    async def get_detailed_user_stats(
+        self, start_today_utc: Any, start_7d_utc: Any, threshold: int = 3
+    ) -> Dict[str, Any]:
+        """Calculate detailed user and referral statistics from MongoDB."""
+        total_registered = await self.collection.count_documents(
+            {"status": {"$ne": "pending"}}
+        )
+        pending_users = await self.collection.count_documents(
+            {"status": "pending"}
+        )
+        total_users = total_registered + pending_users
+
+        registered_today = await self.collection.count_documents({
+            "status": {"$ne": "pending"},
+            "registered_at": {"$gte": start_today_utc},
+        })
+        registered_7d = await self.collection.count_documents({
+            "status": {"$ne": "pending"},
+            "registered_at": {"$gte": start_7d_utc},
+        })
+        legacy_no_timestamp = await self.collection.count_documents({
+            "status": {"$ne": "pending"},
+            "$or": [
+                {"registered_at": None},
+                {"registered_at": {"$exists": False}},
+            ],
+        })
+        total_referred = await self.collection.count_documents({
+            "status": {"$ne": "pending"},
+            "referrer_id": {"$ne": None},
+        })
+
+        # Top referrers with real user_id and count
+        top_cursor = (
+            self.collection.find(
+                {"status": {"$ne": "pending"}, "referrals_count": {"$gt": 0}},
+                {"user_id": 1, "referrals_count": 1},
+            )
+            .sort("referrals_count", pymongo.DESCENDING)
+            .limit(10)
+        )
+        top_referrers = []
+        async for item in top_cursor:
+            top_referrers.append({
+                "user_id": item["user_id"],
+                "count": item.get("referrals_count", 0),
+            })
+
+        completed_eligible_count = await self.collection.count_documents({
+            "status": {"$ne": "pending"},
+            "referrals_count": {"$gte": threshold},
+        })
+
+        return {
+            "total_users": total_users,
+            "total_registered": total_registered,
+            "pending_users": pending_users,
+            "registered_today": registered_today,
+            "registered_7d": registered_7d,
+            "legacy_no_timestamp": legacy_no_timestamp,
+            "total_referred": total_referred,
+            "top_referrers": top_referrers,
+            "completed_eligible_count": completed_eligible_count,
+        }
+
     async def get_stats(self, threshold: int = 3) -> Dict[str, Any]:
-        """Calculate aggregate statistics without revealing individual identities."""
+        """Legacy aggregate statistics for backward compatibility."""
         total_users = await self.collection.count_documents({})
         completed_users = await self.collection.count_documents(
             {"referrals_count": {"$gte": threshold}}
@@ -90,7 +234,6 @@ class UserRepository:
         agg_res = await self.collection.aggregate(pipeline).to_list(length=1)
         total_referrals = agg_res[0]["total"] if agg_res else 0
 
-        # Top 5 referrers masked
         top_cursor = (
             self.collection.find(
                 {"referrals_count": {"$gt": 0}},
@@ -118,6 +261,15 @@ class UserRepository:
             "total_referrals": total_referrals,
             "top_referrers": top_referrers,
         }
+
+    async def get_all_completed_user_ids(self) -> List[int]:
+        """Fetch all registered (completed) user IDs for auditing."""
+        cursor = self.collection.find({"status": {"$ne": "pending"}}, {"user_id": 1})
+        user_ids: List[int] = []
+        async for doc in cursor:
+            if "user_id" in doc:
+                user_ids.append(doc["user_id"])
+        return user_ids
 
     async def get_all_user_ids(self) -> List[int]:
         """Fetch all user IDs for message broadcasting."""

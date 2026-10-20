@@ -17,11 +17,14 @@ from keyboards.admin_keyboards import (
     get_admin_main_keyboard,
     get_admin_media_keyboard,
     get_admin_settings_keyboard,
+    get_admin_stats_keyboard,
     get_broadcast_confirm_keyboard,
     get_cancel_keyboard,
     get_confirm_channel_delete_keyboard,
+    get_promo_preview_keyboard,
 )
 from services.broadcast_service import BroadcastService
+from services.statistics_service import StatisticsService
 from services.subscription_service import SubscriptionService
 from utils.telegram_helpers import safe_send
 
@@ -33,6 +36,8 @@ class AdminStates(StatesGroup):
     waiting_for_threshold = State()
     waiting_for_closed_link = State()
     waiting_for_share_text = State()
+    waiting_for_promo_text = State()
+    waiting_for_promo_confirm = State()
     waiting_for_photo1 = State()
     waiting_for_photo2 = State()
     waiting_for_welcome_sticker = State()
@@ -46,12 +51,16 @@ def create_admin_router(
     user_repo: UserRepository,
     settings_repo: SettingsRepository,
     broadcast_service: BroadcastService,
+    statistics_service: Optional[StatisticsService] = None,
 ) -> Router:
     """Factory creating admin router protected by IsAdminFilter."""
     router = Router(name="admin_router")
     admin_filter = IsAdminFilter(config)
     router.message.filter(admin_filter)
     router.callback_query.filter(admin_filter)
+
+    if statistics_service is None:
+        statistics_service = StatisticsService(user_repo, settings_repo)
 
     async def get_current_settings():
         return await settings_repo.get_settings(config)
@@ -86,37 +95,28 @@ def create_admin_router(
         await cb_admin_main(call, state)
 
     # ---------- 1. Statistics ----------
-    @router.callback_query(F.data == "admin_stats")
-    async def cb_admin_stats(call: types.CallbackQuery):
-        settings = await get_current_settings()
-        stats = await user_repo.get_stats(threshold=settings.required_referrals)
-
-        top_lines = []
-        if stats["top_referrers"]:
-            for i, item in enumerate(stats["top_referrers"], start=1):
-                top_lines.append(f"{i}. <code>{item['masked_id']}</code>: <b>{item['count']} ta</b>")
+    @router.callback_query(F.data.in_(["admin_stats", "admin_stats_refresh"]))
+    async def cb_admin_stats(call: types.CallbackQuery, bot: Bot):
+        force_refresh = (call.data == "admin_stats_refresh")
+        if force_refresh:
+            await call.answer("⏳ Statistika yangilanmoqda, kuting...")
         else:
-            top_lines.append("<i>Hozircha referallar yo'q</i>")
+            await call.answer()
 
-        sub_status = "🟢 Yoqilgan" if settings.subscription_check_enabled else "🔴 O'chirilgan"
-
-        text = (
-            "📊 <b>Bot Statistikasi</b>\n\n"
-            f"👥 <b>Jami foydalanuvchilar:</b> {stats['total_users']} ta\n"
-            f"✅ <b>Shartni bajarganlar (≥ {settings.required_referrals}):</b> {stats['completed_users']} ta\n"
-            f"⏳ <b>Jarayondagilar:</b> {stats['pending_users']} ta\n"
-            f"📈 <b>Jami taklif qilingan referallar:</b> {stats['total_referrals']} ta\n\n"
-            f"📢 <b>Majburiy obuna holati:</b> {sub_status}\n\n"
-            f"🏆 <b>Top ishtirokchilar:</b>\n" + "\n".join(top_lines)
-        )
-        builder = types.InlineKeyboardMarkup(
-            inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Orqaga", callback_data="admin_main")]]
-        )
         try:
-            await call.message.edit_text(text, reply_markup=builder)
+            stats = await statistics_service.get_statistics(
+                bot=bot, config=config, force_refresh=force_refresh
+            )
+            text = StatisticsService.format_statistics_message(stats)
+        except Exception as e:
+            logger.error(f"Error fetching statistics: {e}", exc_info=True)
+            text = f"❌ Statistikani yuklashda xatolik yuz berdi: {e}"
+
+        kb = get_admin_stats_keyboard()
+        try:
+            await call.message.edit_text(text, reply_markup=kb)
         except Exception:
-            await call.message.answer(text, reply_markup=builder)
-        await call.answer()
+            await call.message.answer(text, reply_markup=kb)
 
     # ---------- 2. Channels Management ----------
     @router.callback_query(F.data == "admin_channels")
@@ -299,31 +299,88 @@ def create_admin_router(
             await call.message.answer(text, reply_markup=get_admin_media_keyboard())
         await call.answer()
 
-    @router.callback_query(F.data == "admin_set_share_text")
-    async def cb_set_share_text(call: types.CallbackQuery, state: FSMContext):
-        await state.set_state(AdminStates.waiting_for_share_text)
+    @router.callback_query(F.data.in_(["admin_edit_promo", "admin_set_share_text"]))
+    async def cb_edit_promo_text(call: types.CallbackQuery, state: FSMContext):
+        await state.set_state(AdminStates.waiting_for_promo_text)
         text = (
-            "📝 <b>Yangi reklama posti matnini yuboring.</b>\n\n"
-            "❗️ <b>Muhim:</b> Matnda foydalanuvchining shaxsiy referal havolasi joylashishi uchun "
+            "📝 <b>Asosiy xabarni tahrirlash</b>\n\n"
+            "Yangi asosiy reklama posti xabarini yuboring.\n\n"
+            "💡 <i>Qalin (bold), kursiv (italic), havola (link), blockquote va boshqa Telegram HTML teglari to'liq qo'llab-quvvatlanadi.</i>\n\n"
+            "❗️ <b>Muhim:</b> Matnda foydalanuvchining shaxsiy taklif havolasi joylashishi uchun "
             "<code>{link}</code> tegini qoldirishni unutmang!\n\n"
-            "<i>Masalan: <a href=\"{link}\">Botga ulanish</a></i>"
+            "<i>Masalan: &lt;a href=\"{link}\"&gt;Botdan ro'yxatdan o'ting va marafonga qo'shiling.&lt;/a&gt;</i>"
         )
-        await call.message.edit_text(text, reply_markup=get_cancel_keyboard())
+        try:
+            await call.message.edit_text(text, reply_markup=get_cancel_keyboard())
+        except Exception:
+            await call.message.answer(text, reply_markup=get_cancel_keyboard())
         await call.answer()
 
-    @router.message(AdminStates.waiting_for_share_text)
-    async def msg_save_share_text(message: types.Message, state: FSMContext):
-        text = (message.text or "").strip()
-        if "{link}" not in text:
+    @router.message(AdminStates.waiting_for_promo_text)
+    async def msg_receive_promo_text(message: types.Message, state: FSMContext, bot: Bot):
+        text = (message.html_text or message.text or "").strip()
+        if not text:
             await message.answer(
-                "❌ Matnda <code>{link}</code> tegi bo'lishi shart! Iltimos, qayta yuboring:",
+                "❌ Bo'sh bo'lmagan xabar yuboring:",
                 reply_markup=get_cancel_keyboard(),
             )
             return
 
-        await settings_repo.update_settings({"share_text": text})
+        if "{link}" not in text:
+            await message.answer(
+                "❌ Xabarda <code>{link}</code> tegi bo'lishi shart!\n\n"
+                "Ushbu teg o'rniga har bir foydalanuvchining shaxsiy referal havolasi qo'yiladi. "
+                "Iltimos, <code>{link}</code> tegini qoldirib qayta yuboring:",
+                reply_markup=get_cancel_keyboard(),
+            )
+            return
+
+        # Validate that format succeeds with sample link
+        bot_info = await bot.get_me()
+        bot_username = bot_info.username or "ArabiyaBoost_bot"
+        sample_link = f"https://t.me/{bot_username}?start=123456789"
+        try:
+            preview_formatted = text.format(link=sample_link)
+        except Exception as e:
+            await message.answer(
+                f"❌ Matn formatlashda xatolik yuz berdi: {e}. Iltimos, qayta yuboring:",
+                reply_markup=get_cancel_keyboard(),
+            )
+            return
+
+        await state.update_data(pending_promo_text=text)
+        await state.set_state(AdminStates.waiting_for_promo_confirm)
+
+        preview_msg = (
+            "👁 <b>Yangi xabar ko'rinishi (Preview):</b>\n\n"
+            f"{preview_formatted}\n\n"
+            "────────────────────\n"
+            "Ushbu xabarni asosiy reklama posti sifatida saqlashni tasdiqlaysizmi?"
+        )
+        await message.answer(preview_msg, reply_markup=get_promo_preview_keyboard())
+
+    @router.callback_query(F.data == "admin_promo_confirm", AdminStates.waiting_for_promo_confirm)
+    async def cb_promo_confirm(call: types.CallbackQuery, state: FSMContext):
+        data = await state.get_data()
+        new_text = data.get("pending_promo_text")
         await state.clear()
-        await message.answer("✅ Yangi reklama posti matni saqlandi!", reply_markup=get_admin_main_keyboard())
+
+        if not new_text:
+            await call.answer("Xatolik: Yangi matn topilmadi.", show_alert=True)
+            await cb_admin_main(call, state)
+            return
+
+        await settings_repo.update_settings({"share_text": new_text})
+        success_text = (
+            "✅ <b>Asosiy reklama xabari muvaffaqiyatli saqlandi!</b>\n\n"
+            "Yangi xabar darhol kuchga kirdi va barcha yangi foydalanuvchilarga yuboriladi. "
+            "U bot qayta ishga tushganda ham MongoDB da saqlanib qoladi."
+        )
+        try:
+            await call.message.edit_text(success_text, reply_markup=get_admin_main_keyboard())
+        except Exception:
+            await call.message.answer(success_text, reply_markup=get_admin_main_keyboard())
+        await call.answer("Muvaffaqiyatli saqlandi!")
 
     @router.callback_query(F.data.in_(["admin_set_photo1", "admin_set_photo2", "admin_set_welcome_sticker", "admin_set_success_sticker"]))
     async def cb_set_media_items(call: types.CallbackQuery, state: FSMContext):

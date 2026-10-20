@@ -18,6 +18,32 @@ class MockUserRepository:
     async def user_exists(self, user_id: int) -> bool:
         return user_id in self.users
 
+    async def save_pending_user(
+        self, user_id: int, pending_referrer_id: Optional[int] = None
+    ) -> tuple[bool, Dict[str, Any]]:
+        if user_id in self.users:
+            return False, self.users[user_id]
+        doc = {
+            "user_id": user_id,
+            "referrer_id": None,
+            "pending_referrer_id": pending_referrer_id,
+            "referrals_count": 0,
+            "status": "pending",
+        }
+        self.users[user_id] = doc
+        return True, doc
+
+    async def complete_user_registration(
+        self, user_id: int, referrer_id: Optional[int] = None
+    ) -> tuple[bool, Dict[str, Any]]:
+        user = self.users.get(user_id)
+        if not user or user.get("status") != "pending":
+            return False, user or {}
+        user["status"] = "completed"
+        user["referrer_id"] = referrer_id
+        user.pop("pending_referrer_id", None)
+        return True, user
+
     async def create_user(
         self, user_id: int, referrer_id: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -26,6 +52,7 @@ class MockUserRepository:
                 "user_id": user_id,
                 "referrer_id": referrer_id,
                 "referrals_count": 0,
+                "status": "completed",
             }
         return self.users[user_id]
 

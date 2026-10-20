@@ -1,4 +1,4 @@
-"""User handlers preserving existing bot behaviors and flows."""
+"""User handlers with automatic subscription verification and personalized sharing."""
 
 from __future__ import annotations
 
@@ -10,8 +10,9 @@ from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import InputMediaPhoto
 
 from config import BotConfig
+from database.models import BotSettingsDocument
 from database.repository import SettingsRepository, UserRepository
-from keyboards.user_keyboards import get_sub_keyboard
+from keyboards.user_keyboards import build_share_url, get_share_keyboard, get_sub_keyboard
 from services.referral_service import ReferralService
 from services.subscription_service import SubscriptionService
 from utils.telegram_helpers import NO_PREVIEW, safe_send, safe_send_media_group, safe_sticker
@@ -24,11 +25,11 @@ def create_user_router(
     user_repo: UserRepository,
     settings_repo: SettingsRepository,
 ) -> Router:
-    """Factory creating user router with injected dependencies."""
+    """Factory creating user router with automatic verification and sharing flows."""
     router = Router(name="user_router")
     referral_service = ReferralService(user_repo)
 
-    async def get_current_settings():
+    async def get_current_settings() -> BotSettingsDocument:
         return await settings_repo.get_settings(config)
 
     @router.message(CommandStart())
@@ -39,7 +40,11 @@ def create_user_router(
         ref_id = command.args
         settings = await get_current_settings()
 
-        # Check subscription
+        # 1. Save user and referral parameter as a pending registration in MongoDB
+        # Preserves user's original referral parameter throughout the process
+        await referral_service.save_pending_registration(user_id=user_id, ref_arg=ref_id)
+
+        # 2. Check if user is ALREADY subscribed to all required channels
         is_sub = await SubscriptionService.is_subscribed(
             bot=bot,
             user_id=user_id,
@@ -48,27 +53,57 @@ def create_user_router(
         )
 
         if not is_sub:
+            # User has not yet joined all mandatory channels; send channel links without manual confirmation button
             await safe_sticker(bot, user_id, settings.welcome_sticker)
             text = (
-                "🚀 <b>Marafonda ishtirok etish uchun quyidagi kanallarga a'zo bo'ling.</b>\n\n"
-                '<i>Keyin pastdagi "✅ A\'zo bo\'ldim" tugmasini bosing.</i>'
+                "🚀 <b>Marafonda ishtirok etish uchun quyidagi kanallarga a'zo bo'ling:</b>\n\n"
+                "<i>Barcha kanallarga a'zo bo'lishingiz bilan bot avtomatik tarzda ishga tushadi!</i>"
             )
             await message.answer(
                 text,
-                reply_markup=get_sub_keyboard(settings.mandatory_channels, ref_id),
+                reply_markup=get_sub_keyboard(settings.mandatory_channels),
             )
             return
 
-        await handle_registration_and_response(user_id, ref_id, bot, settings)
+        # If already subscribed to every required channel, complete immediately
+        await complete_registration_and_respond(user_id=user_id, bot=bot, settings=settings)
+
+    @router.chat_member()
+    async def chat_member_updated_handler(event: types.ChatMemberUpdated, bot: Bot):
+        """Telegram chat_member update handler for automatic subscription verification."""
+        chat_id = event.chat.id
+        settings = await get_current_settings()
+
+        # Only process updates from mandatory channels
+        mandatory_ids = {ch.id for ch in settings.mandatory_channels}
+        if chat_id not in mandatory_ids:
+            return
+
+        if event.new_chat_member.user.is_bot:
+            return
+
+        user_id = event.new_chat_member.user.id
+
+        # When a user joins or leaves a mandatory channel, automatically check membership in ALL required channels
+        is_sub = await SubscriptionService.is_subscribed(
+            bot=bot,
+            user_id=user_id,
+            channels=settings.mandatory_channels,
+            check_enabled=settings.subscription_check_enabled,
+        )
+
+        await user_repo.update_subscription_status(user_id, is_sub)
+
+        # As soon as the user is subscribed to every required channel, complete registration
+        if is_sub:
+            user = await user_repo.get_user(user_id)
+            if user and user.get("status") == "pending":
+                await complete_registration_and_respond(user_id=user_id, bot=bot, settings=settings)
 
     @router.callback_query(F.data.startswith("checksub_"))
-    async def check_sub_handler(call: types.CallbackQuery, bot: Bot):
+    async def fallback_check_sub_handler(call: types.CallbackQuery, bot: Bot):
+        """Fallback callback handler for legacy confirmation buttons from prior versions."""
         user_id = call.from_user.id
-        parts = call.data.split("_", 1)
-        ref_id = parts[1] if len(parts) > 1 else None
-        if ref_id in ("none", "", None):
-            ref_id = None
-
         settings = await get_current_settings()
 
         is_sub = await SubscriptionService.is_subscribed(
@@ -90,14 +125,14 @@ def create_user_router(
         except Exception:
             pass
 
-        await handle_registration_and_response(user_id, ref_id, bot, settings)
+        await complete_registration_and_respond(user_id=user_id, bot=bot, settings=settings)
 
-    async def handle_registration_and_response(
-        user_id: int, ref_id: Optional[str | int], bot: Bot, settings
+    async def complete_registration_and_respond(
+        user_id: int, bot: Bot, settings: BotSettingsDocument
     ):
-        result = await referral_service.process_registration(
+        """Complete registration atomically and deliver welcome, stats, promotional album, and share button."""
+        result = await referral_service.complete_registration(
             user_id=user_id,
-            ref_arg=ref_id,
             required_referrals=settings.required_referrals,
         )
 
@@ -133,9 +168,11 @@ def create_user_router(
                     f"📈 Hozirgi takliflaringiz soni: <b>{count}</b> ta.",
                 )
 
-        # Respond to the user
+        # Build personalized referral and share links
         bot_info = await bot.get_me()
-        my_link = f"https://t.me/{bot_info.username}?start={user_id}"
+        bot_username = bot_info.username or "ArabiyaBoost_bot"
+        my_link, share_url = build_share_url(bot_username, user_id)
+        share_kb = get_share_keyboard(share_url)
 
         if result.is_completed:
             await safe_send(
@@ -144,6 +181,7 @@ def create_user_router(
                 f"✅ <b>Siz kerakli miqdordagi do'stlaringizni taklif qilgansiz!</b>\n\n"
                 f"<blockquote>Marafonga kirish uchun ssilka: {settings.closed_channel_link}</blockquote>\n"
                 f"📊 Jami takliflaringiz: <b>{result.user_referrals_count} ta.</b>",
+                reply_markup=share_kb,
                 link_preview_options=NO_PREVIEW,
             )
             return
@@ -157,13 +195,13 @@ def create_user_router(
             f"📊 <b>Taklif qilgan do'stlaringiz:</b> {result.user_referrals_count}/{settings.required_referrals}",
         )
 
-        # Send media group or fallback
+        # Format promotional post text
         try:
             post_text = settings.share_text.format(link=my_link)
         except Exception:
             post_text = f"{settings.share_text}\n\n{my_link}"
 
-        delivered = False
+        delivered_media = False
         if settings.photo_1 and settings.photo_2:
             try:
                 media_group = [
@@ -176,11 +214,27 @@ def create_user_router(
                 ]
                 res = await safe_send_media_group(bot, user_id, media_group)
                 if res:
-                    delivered = True
+                    delivered_media = True
             except Exception as e:
                 logger.warning(f"Media group failed for {user_id}: {e}")
 
-        if not delivered:
-            await safe_send(bot, user_id, post_text, link_preview_options=NO_PREVIEW)
+        if delivered_media:
+            # Telegram does not support attaching inline keyboards directly to media groups;
+            # send short follow-up message containing the inline sharing button directly below it
+            await safe_send(
+                bot,
+                user_id,
+                "👇 <b>Do'stlaringizga ulashish uchun quyidagi tugmani bosing:</b>",
+                reply_markup=share_kb,
+            )
+        else:
+            # Fallback text message with share button attached directly
+            await safe_send(
+                bot,
+                user_id,
+                post_text,
+                reply_markup=share_kb,
+                link_preview_options=NO_PREVIEW,
+            )
 
     return router
